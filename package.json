@@ -1,0 +1,31 @@
+{
+  "name": "mcp-codebase",
+  "version": "1.0.0",
+  "description": "MCP server for codebase navigation with AST-based indexing",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "mcp-codebase": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "start": "node dist/index.js",
+    "prepare": "npm run build"
+  },
+  "keywords": ["mcp", "codebase", "indexing", "navigation"],
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.4",
+    "chokidar": "^4.0.0",
+    "ignore": "^6.0.0",
+    "pg": "^8.13.0",
+    "typescript": "^5.6.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/pg": "^8.11.0",
+    "ts-node": "^10.9.0"
+  }
+}

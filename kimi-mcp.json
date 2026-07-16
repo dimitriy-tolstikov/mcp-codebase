@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "codebase": {
+      "command": "node",
+      "args": ["<path-to-mcp-codebase>/dist/index.js"],
+      "env": {
+        "PROJECT_ROOT": "<path-to-your-codebase>",
+        "PGHOST": "localhost",
+        "PGPORT": "5432",
+        "PGDATABASE": "codebase_index",
+        "PGUSER": "postgres",
+        "PGPASSWORD": "your_password"
+      }
+    }
+  }
+}
