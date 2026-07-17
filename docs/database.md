@@ -31,10 +31,10 @@ comes from env — there is no parameter support for identifiers.
 | `id` | `SERIAL PRIMARY KEY` | |
 | `path` | `TEXT UNIQUE NOT NULL` | Path relative to `PROJECT_ROOT`, forward slashes |
 | `extension` | `TEXT` | Lowercase, with dot (`.ts`) |
-| `language` | `TEXT` | From parser result, or extension without dot |
+| `language` | `TEXT` | From parser result, else `config.languageMap`, else extension without dot |
 | `size` | `INTEGER` | Bytes |
 | `line_count` | `INTEGER` | 0 for unparsed files |
-| `mtime` | `BIGINT` | `mtimeMs`, floored. Recorded but never compared |
+| `mtime` | `BIGINT` | `mtimeMs`, floored; compared during incremental reindex |
 | `indexed_at` | `TIMESTAMP DEFAULT NOW()` | Refreshed on every upsert |
 
 Indexes: `idx_files_ext` (extension), `idx_files_lang` (language),
@@ -75,7 +75,7 @@ Indexes: `idx_imports_source`, `idx_imports_file`.
 |---|---|---|
 | `id` | `SERIAL PRIMARY KEY` | |
 | `file_id` | `INTEGER → files(id) ON DELETE CASCADE` | |
-| `symbol_id` | `INTEGER → symbols(id) ON DELETE SET NULL` | Nullable; currently never set by the indexer |
+| `symbol_id` | `INTEGER → symbols(id) ON DELETE SET NULL` | Nullable; linked at insert time when the export resolves to a same-file symbol (via `symbolName`, falling back to the export name). NULL for `export default <expr>` and re-exports |
 | `name` | `TEXT`, nullable | |
 | `is_default` | `BOOLEAN DEFAULT FALSE` | |
 | `is_reexport` | `BOOLEAN DEFAULT FALSE` | |
@@ -87,15 +87,17 @@ Indexes: `idx_exports_file`.
 
 - `insertFilesBatch(client, files)` — multi-row `INSERT ... ON CONFLICT (path) DO UPDATE`,
   returns `Map<path, id>` via `RETURNING`. Also refreshes `indexed_at`.
-- `deleteFileByPath(client, path)` — cascades to symbols/imports/exports.
+- `deleteFileByPath(client, path)` / `deleteFilesByPaths(client, paths)` — single and batch
+  deletes; both cascade to symbols/imports/exports. Every flush deletes its batch's paths
+  before inserting, so re-indexing a file never duplicates child rows.
+- `getFileMtimes()` — `path → mtime` map of all indexed files; backs incremental reindex
+  (skip unchanged, prune missing).
+- `getSymbolIdsByFileIds(client, fileIds)` — `"fileId:name" → symbol id` map used to link
+  exports to their symbols after symbols are inserted.
 - `insertSymbolsBatch` / `insertImportsBatch` / `insertExportsBatch` — plain multi-row
   inserts; `modifiers` / `names` are `JSON.stringify`-ed. Callers sub-batch at 500 rows
-  (PostgreSQL parameter limit).
-
-Symbols/imports/exports have **no upsert** — correctness relies on the caller deleting or
-truncating first (`indexSingleFile` deletes; full reindex truncates). A bare incremental
-`indexProject({ full: false })` re-inserts file rows via upsert but appends child rows,
-which can duplicate symbols — see [Known limitations](development.md#known-limitations).
+  (PostgreSQL parameter limit). `insertExportsBatch` also writes `symbol_id` when the
+  caller resolved one.
 
 ## Read path
 
@@ -120,6 +122,7 @@ which can duplicate symbols — see [Known limitations](development.md#known-lim
 - **Startup**: `ensureDatabase()` creates the DB if missing; `initSchema()` creates
   extension/tables/indexes; an empty `files` table triggers a full initial index.
 - **Full reindex**: `TRUNCATE files, symbols, imports, exports CASCADE`, then re-crawl.
-- **Watcher updates**: delete file row (cascade) + re-insert, in one transaction.
-- **Deleted files** are never removed (watcher `unlink` only logs) — they persist until a
-  full reindex.
+- **Incremental reindex**: skips files with unchanged `mtime`, prunes rows for files gone
+  from disk, and re-inserts only new/changed files (deleting their old rows first).
+- **Watcher updates**: add/change = delete file row (cascade) + re-insert in one
+  transaction; unlink = delete the row.

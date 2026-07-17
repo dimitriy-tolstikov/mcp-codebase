@@ -98,23 +98,9 @@ migration framework). Batch insert/query helpers go in `src/db/repositories.ts`.
 Deliberate or accepted gaps — do not "fix" silently; discuss first, and update docs if
 behavior changes:
 
-- **Incremental reindex does not use `mtime`.** `indexProject({ full: false })` skips the
-  truncate but still re-scans and re-parses every file; `mtime` is recorded but never
-  compared. The README's "incremental (by mtime)" describes intent, not behavior.
-- **Incremental reindex can duplicate symbols.** Child rows (symbols/imports/exports) are
-  plain-inserted per batch without deleting previous rows for re-upserted files. Full
-  reindex (`full: true`) is the reliable path.
-- **File deletions are not removed from the index.** The watcher's `unlink` handler only
-  logs; stale rows persist until a full reindex.
-- **`explore_module`'s `depth` parameter is validated (0–3) but unused** by the handler.
-- **Unused config keys**: `copyThreshold`, `watchDebounceMs`, `periodicCheckMs` are defined
-  but not wired into behavior; `languageMap` is not consumed by any code (the stored
-  `language` comes from the parser/extension). The watcher has its own separate ignore
-  list and extension allowlist.
 - **The C# parser is heuristic** (regex, line-oriented): false positives such as local
   variables indexed as fields, `lineEnd == lineStart`, missed multi-line constructs.
 - **`find_usages` is text search** (word-boundary regex), not semantic reference
   resolution.
 - **`get_module_dependencies` "used by" is a `LIKE` heuristic** on import sources, not a
   resolved module graph.
-- **`exports.symbol_id` is never populated** by the indexer (always NULL).

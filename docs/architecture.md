@@ -21,7 +21,7 @@
                │
         src/indexer/file-crawler.ts  +  src/parsers/* (per-language AST/regex parsing)
                ▲
-        src/indexer/watcher.ts (chokidar) ── reindex on file add/change
+        src/indexer/watcher.ts (chokidar) ── reindex on add/change, delete on unlink
 ```
 
 Two data paths exist:
@@ -72,33 +72,40 @@ stdout** — the MCP protocol owns that channel; all logging uses `console.error
    symbols). Parse errors skip the file's symbols but not the file row.
 4. **Batch flush.** Every `config.batchSize` (1000) files, `flushBatch()` writes one
    transaction:
+   - The batch's file paths are deleted first (`DELETE FROM files WHERE path = ANY(...)`),
+     cascading to symbols/imports/exports — re-indexing a file never duplicates child rows.
    - `insertFilesBatch()` upserts file rows `ON CONFLICT (path) DO UPDATE` and returns a
      `path → id` map (`RETURNING id, path`).
-   - Symbols/imports/exports are inserted in sub-batches of 500 rows to stay under
-     PostgreSQL's parameter limit (65535).
+   - Symbols/imports are inserted in sub-batches of 500 rows to stay under PostgreSQL's
+     parameter limit (65535). Exports are inserted last, each linked to its symbol
+     (`exports.symbol_id`) via a `file_id + name` lookup when it resolves.
 5. **Full vs incremental.** `full: true` first runs `TRUNCATE files, symbols, imports,
-   exports CASCADE`. `full: false` skips the truncate but still re-scans and re-upserts
-   **every** file — `mtime` is recorded but never compared (see
-   [Known limitations](development.md#known-limitations)).
+   exports CASCADE`. `full: false` (incremental) loads the stored `path → mtime` map,
+   skips files whose mtime is unchanged (`stats.skipped`), deletes rows for files that no
+   longer exist on disk (`stats.removed`), and indexes only new or changed files.
 
 ### Single-file indexing
 
 `indexSingleFile(absolutePath, rootDir)` — used by the watcher — runs one transaction:
-`DELETE FROM files WHERE path = $1` (child rows cascade), then re-parse and re-insert.
-Files with no registered parser are re-inserted as metadata-only rows.
+`DELETE FROM files WHERE path = $1` (child rows cascade), then re-parse and re-insert
+(including export → symbol linking). Files with no registered parser are re-inserted as
+metadata-only rows. `removeFileFromIndex(absolutePath, rootDir)` performs the delete-only
+half for files removed from disk.
 
 ## Watch mode
 
 `startWatcher()` (`src/indexer/watcher.ts`) uses chokidar with:
 
 - `ignored`: dotfiles, `node_modules`, `dist`, `build`, `*.min.js`, `*.map`
-- `ignoreInitial: true`, `awaitWriteFinish: { stabilityThreshold: 300, pollInterval: 100 }`
+- `ignoreInitial: true`, `awaitWriteFinish: { stabilityThreshold: config.watchDebounceMs`
+  (300 ms), `pollInterval: 100 }`
 
 Handlers:
 
-- `add` / `change` → `indexSingleFile()`, but only for the hardcoded extension allowlist
-  `.ts .tsx .js .jsx .cs .mjs .cjs`. Successes and failures are logged to stderr.
-- `unlink` → **only logs**. Deleted files stay in the index until a full reindex.
+- `add` / `change` → `indexSingleFile()`, but only for extensions listed in
+  `config.languageMap`. Successes and failures are logged to stderr.
+- `unlink` → `removeFileFromIndex()` deletes the file row (children cascade), so deleted
+  files disappear from the index immediately.
 
 The watcher is a singleton; a second `startWatcher()` call is a no-op.
 

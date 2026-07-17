@@ -1,9 +1,12 @@
 import { FSWatcher, watch } from 'chokidar';
 import path from 'path';
 import { config } from '../config.js';
-import { indexSingleFile } from './indexer.js';
+import { indexSingleFile, removeFileFromIndex } from './indexer.js';
 
 let watcher: FSWatcher | null = null;
+
+// Extensions that get (re)indexed on add/change — driven by config.languageMap
+const watchedExtensions = new Set(Object.keys(config.languageMap));
 
 export function startWatcher(rootDir: string): void {
   if (watcher) return;
@@ -20,14 +23,14 @@ export function startWatcher(rootDir: string): void {
     ignoreInitial: true,
     persistent: true,
     awaitWriteFinish: {
-      stabilityThreshold: 300,
+      stabilityThreshold: config.watchDebounceMs,
       pollInterval: 100,
     },
   });
 
   const handleChange = async (filePath: string) => {
     const ext = path.extname(filePath).toLowerCase();
-    if (!['.ts', '.tsx', '.js', '.jsx', '.cs', '.mjs', '.cjs'].includes(ext)) return;
+    if (!watchedExtensions.has(ext)) return;
 
     try {
       await indexSingleFile(filePath, rootDir);
@@ -38,8 +41,12 @@ export function startWatcher(rootDir: string): void {
   };
 
   const handleUnlink = async (filePath: string) => {
-    // File deletion handled by indexer transaction
-    console.error(`[watch] Removed: ${path.relative(rootDir, filePath)}`);
+    try {
+      await removeFileFromIndex(filePath, rootDir);
+      console.error(`[watch] Removed from index: ${path.relative(rootDir, filePath)}`);
+    } catch (err) {
+      console.error(`[watch] Failed to remove ${filePath}:`, (err as Error).message);
+    }
   };
 
   watcher.on('add', handleChange);

@@ -36,32 +36,13 @@ export async function handleExploreModule(args: z.infer<typeof ExploreModuleSche
     }
   }
 
-  // List subdirectories
-  try {
-    const entries = fs.readdirSync(absoluteDir, { withFileTypes: true });
-    const dirs = entries.filter((e) => e.isDirectory());
-    if (dirs.length) {
-      output += `\nSubdirectories:\n`;
-      for (const d of dirs) {
-        const subPath = path.join(absoluteDir, d.name);
-        let fileCount = 0;
-        try {
-          const subEntries = fs.readdirSync(subPath, { recursive: true }) as string[];
-          fileCount = subEntries.filter((e) => {
-            try {
-              return fs.statSync(path.join(subPath, e)).isFile();
-            } catch {
-              return false;
-            }
-          }).length;
-        } catch {
-          // ignore
-        }
-        output += `  - ${d.name}/  (${fileCount} files)\n`;
-      }
+  // List subdirectories up to `depth` levels (depth 0 hides this section)
+  if (args.depth > 0) {
+    const dirLines: string[] = [];
+    listSubdirectories(absoluteDir, args.depth, '  ', dirLines);
+    if (dirLines.length) {
+      output += `\nSubdirectories:\n${dirLines.join('\n')}\n`;
     }
-  } catch {
-    // ignore
   }
 
   if (stats.topImports.length) {
@@ -72,4 +53,46 @@ export async function handleExploreModule(args: z.infer<typeof ExploreModuleSche
   }
 
   return output;
+}
+
+// Directories that are never descended into when listing or counting
+const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', 'build']);
+
+function countFilesRecursive(dir: string): number {
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return 0;
+  }
+
+  let count = 0;
+  for (const entry of entries) {
+    if (entry.isDirectory()) {
+      if (!SKIP_DIRS.has(entry.name)) {
+        count += countFilesRecursive(path.join(dir, entry.name));
+      }
+    } else if (entry.isFile()) {
+      count++;
+    }
+  }
+  return count;
+}
+
+function listSubdirectories(dir: string, depth: number, indent: string, lines: string[]): void {
+  if (depth <= 0) return;
+
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return;
+  }
+
+  for (const entry of entries) {
+    if (!entry.isDirectory() || SKIP_DIRS.has(entry.name)) continue;
+    const subDir = path.join(dir, entry.name);
+    lines.push(`${indent}- ${entry.name}/  (${countFilesRecursive(subDir)} files)`);
+    listSubdirectories(subDir, depth - 1, indent + '  ', lines);
+  }
 }

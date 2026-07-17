@@ -13,6 +13,9 @@ import {
   insertImportsBatch,
   insertExportsBatch,
   deleteFileByPath,
+  deleteFilesByPaths,
+  getFileMtimes,
+  getSymbolIdsByFileIds,
 } from '../db/repositories.js';
 
 const parsers: Map<string, ILanguageParser> = new Map();
@@ -32,12 +35,18 @@ export function getParserForExtension(ext: string): ILanguageParser | undefined 
   return extToParser.get(ext);
 }
 
+function languageForExtension(ext: string): string {
+  return config.languageMap[ext] || ext.replace('.', '');
+}
+
 export interface IndexStats {
   scanned: number;
   parsed: number;
   symbols: number;
   imports: number;
   exports: number;
+  skipped: number;
+  removed: number;
   durationMs: number;
 }
 
@@ -57,20 +66,43 @@ export async function indexProject(options?: { full?: boolean; rootDir?: string 
     symbols: 0,
     imports: 0,
     exports: 0,
+    skipped: 0,
+    removed: 0,
     durationMs: 0,
   };
 
-  const files: FileEntry[] = [];
+  const allFiles: FileEntry[] = [];
   for (const entry of crawlFiles(rootDir, ig, config.ignorePatterns)) {
-    files.push(entry);
+    allFiles.push(entry);
   }
-  stats.scanned = files.length;
+  stats.scanned = allFiles.length;
+
+  let files = allFiles;
 
   if (full) {
     // Truncate all tables for full reindex
     await withTransaction(async (client) => {
       await client.query('TRUNCATE files, symbols, imports, exports CASCADE');
     });
+  } else {
+    // Incremental reindex: skip unchanged files (by mtime) and drop rows
+    // of files that no longer exist on disk
+    const existing = await getFileMtimes();
+    const crawledPaths = new Set(allFiles.map((f) => f.relativePath));
+
+    const stalePaths = [...existing.keys()].filter((p) => !crawledPaths.has(p));
+    if (stalePaths.length > 0) {
+      await withTransaction(async (client) => {
+        await deleteFilesByPaths(client, stalePaths);
+      });
+      stats.removed = stalePaths.length;
+    }
+
+    files = allFiles.filter((f) => {
+      const oldMtime = existing.get(f.relativePath);
+      return oldMtime === undefined || Math.floor(f.mtime) !== oldMtime;
+    });
+    stats.skipped = allFiles.length - files.length;
   }
 
   // Process in batches
@@ -117,10 +149,14 @@ async function flushBatch(
   batch: { entry: FileEntry & { lineCount?: number }; result: ParseResult | null }[]
 ): Promise<void> {
   await withTransaction(async (client) => {
+    // Drop previous rows for these files first (cascades to symbols/imports/exports),
+    // so re-indexing a file never accumulates duplicate child rows
+    await deleteFilesByPaths(client, batch.map((b) => b.entry.relativePath));
+
     const fileRecords = batch.map((b) => ({
       path: b.entry.relativePath,
       extension: b.entry.extension,
-      language: b.result?.language || b.entry.extension.replace('.', ''),
+      language: b.result?.language || languageForExtension(b.entry.extension),
       size: b.entry.size,
       line_count: b.entry.lineCount || 0,
       mtime: Math.floor(b.entry.mtime),
@@ -130,7 +166,7 @@ async function flushBatch(
 
     const allSymbols: { fileId: number; info: any }[] = [];
     const allImports: { fileId: number; info: any }[] = [];
-    const allExports: { fileId: number; info: any }[] = [];
+    const allExports: { fileId: number; info: any; symbolId?: number }[] = [];
 
     for (const item of batch) {
       const fileId = fileMap.get(item.entry.relativePath);
@@ -155,8 +191,19 @@ async function flushBatch(
     for (let i = 0; i < allImports.length; i += subBatch) {
       await insertImportsBatch(client, allImports.slice(i, i + subBatch));
     }
-    for (let i = 0; i < allExports.length; i += subBatch) {
-      await insertExportsBatch(client, allExports.slice(i, i + subBatch));
+
+    // Link exports to the freshly inserted symbols
+    if (allExports.length > 0) {
+      const symbolIds = await getSymbolIdsByFileIds(client, [...fileMap.values()]);
+      for (const exp of allExports) {
+        const symbolName = exp.info.symbolName || exp.info.name;
+        if (symbolName) {
+          exp.symbolId = symbolIds.get(`${exp.fileId}:${symbolName}`);
+        }
+      }
+      for (let i = 0; i < allExports.length; i += subBatch) {
+        await insertExportsBatch(client, allExports.slice(i, i + subBatch));
+      }
     }
   });
 }
@@ -175,7 +222,7 @@ export async function indexSingleFile(absolutePath: string, rootDir: string): Pr
       await insertFilesBatch(client, [{
         path: relativePath,
         extension: ext,
-        language: ext.replace('.', ''),
+        language: languageForExtension(ext),
         size: stat.size,
         line_count: 0,
         mtime: Math.floor(stat.mtimeMs),
@@ -190,7 +237,7 @@ export async function indexSingleFile(absolutePath: string, rootDir: string): Pr
     const fileMap = await insertFilesBatch(client, [{
       path: relativePath,
       extension: ext,
-      language: result?.language || ext.replace('.', ''),
+      language: result?.language || languageForExtension(ext),
       size: fs.statSync(absolutePath).size,
       line_count: lineCount,
       mtime: Math.floor(fs.statSync(absolutePath).mtimeMs),
@@ -201,6 +248,22 @@ export async function indexSingleFile(absolutePath: string, rootDir: string): Pr
 
     await insertSymbolsBatch(client, result.symbols.map((s) => ({ fileId, info: s })));
     await insertImportsBatch(client, result.imports.map((i) => ({ fileId, info: i })));
-    await insertExportsBatch(client, result.exports.map((e) => ({ fileId, info: e })));
+
+    const symbolIds = await getSymbolIdsByFileIds(client, [fileId]);
+    await insertExportsBatch(client, result.exports.map((e) => {
+      const symbolName = e.symbolName || e.name;
+      return {
+        fileId,
+        info: e,
+        symbolId: symbolName ? symbolIds.get(`${fileId}:${symbolName}`) : undefined,
+      };
+    }));
+  });
+}
+
+export async function removeFileFromIndex(absolutePath: string, rootDir: string): Promise<void> {
+  const relativePath = path.relative(rootDir, absolutePath).replace(/\\/g, '/');
+  await withTransaction(async (client) => {
+    await deleteFileByPath(client, relativePath);
   });
 }

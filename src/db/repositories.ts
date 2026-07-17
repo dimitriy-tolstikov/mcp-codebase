@@ -50,6 +50,35 @@ export async function deleteFileByPath(client: PoolClient, filePath: string): Pr
   await client.query('DELETE FROM files WHERE path = $1', [filePath]);
 }
 
+export async function deleteFilesByPaths(client: PoolClient, paths: string[]): Promise<void> {
+  if (paths.length === 0) return;
+  await client.query('DELETE FROM files WHERE path = ANY($1)', [paths]);
+}
+
+export async function getFileMtimes(): Promise<Map<string, number>> {
+  const result = await query('SELECT path, mtime FROM files');
+  const map = new Map<string, number>();
+  for (const row of result.rows) {
+    map.set(row.path, Number(row.mtime));
+  }
+  return map;
+}
+
+export async function getSymbolIdsByFileIds(client: PoolClient, fileIds: number[]): Promise<Map<string, number>> {
+  const map = new Map<string, number>();
+  if (fileIds.length === 0) return map;
+
+  const result = await client.query(
+    'SELECT id, file_id, name FROM symbols WHERE file_id = ANY($1)',
+    [fileIds]
+  );
+  for (const row of result.rows) {
+    // Keyed as "fileId:name" so exports can be linked to their symbols
+    map.set(`${row.file_id}:${row.name}`, row.id);
+  }
+  return map;
+}
+
 export async function insertSymbolsBatch(client: PoolClient, symbols: { fileId: number; info: SymbolInfo }[]): Promise<void> {
   if (symbols.length === 0) return;
 
@@ -106,7 +135,7 @@ export async function insertImportsBatch(client: PoolClient, imports: { fileId: 
   );
 }
 
-export async function insertExportsBatch(client: PoolClient, exports: { fileId: number; info: ExportInfo }[]): Promise<void> {
+export async function insertExportsBatch(client: PoolClient, exports: { fileId: number; info: ExportInfo; symbolId?: number }[]): Promise<void> {
   if (exports.length === 0) return;
 
   const values: any[] = [];
@@ -114,19 +143,20 @@ export async function insertExportsBatch(client: PoolClient, exports: { fileId: 
   let idx = 1;
 
   for (const exp of exports) {
-    placeholders.push(`($${idx}, $${idx + 1}, $${idx + 2}, $${idx + 3}, $${idx + 4})`);
+    placeholders.push(`($${idx}, $${idx + 1}, $${idx + 2}, $${idx + 3}, $${idx + 4}, $${idx + 5})`);
     values.push(
       exp.fileId,
+      exp.symbolId ?? null,
       exp.info.name || null,
       exp.info.isDefault || false,
       exp.info.isReexport || false,
       exp.info.source || null
     );
-    idx += 5;
+    idx += 6;
   }
 
   await client.query(
-    `INSERT INTO exports (file_id, name, is_default, is_reexport, source)
+    `INSERT INTO exports (file_id, symbol_id, name, is_default, is_reexport, source)
      VALUES ${placeholders.join(', ')}`,
     values
   );

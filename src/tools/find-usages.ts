@@ -4,6 +4,9 @@ import { z } from 'zod';
 import { config } from '../config.js';
 import { getSymbolById, getSymbolByNameAndPath } from '../db/repositories.js';
 
+// Extensions to scan — driven by config.languageMap
+const SOURCE_EXTENSIONS = new Set(Object.keys(config.languageMap));
+
 export const FindUsagesSchema = z.object({
   name: z.string().describe('Symbol name to search for'),
   file_path: z.string().optional().describe('File path where symbol is defined (for narrowing)'),
@@ -52,7 +55,7 @@ export async function handleFindUsages(args: z.infer<typeof FindUsagesSchema>): 
         searchDir(absPath, relPath);
       } else if (entry.isFile()) {
         const ext = path.extname(entry.name).toLowerCase();
-        if (!['.ts', '.tsx', '.js', '.jsx', '.cs', '.mjs', '.cjs'].includes(ext)) continue;
+        if (!SOURCE_EXTENSIONS.has(ext)) continue;
 
         let content: string;
         try {

@@ -75,17 +75,18 @@ File: `src/tools/explore-module.ts` → `getModuleStats()` in `src/db/repositori
 | Parameter | Type | Required | Default | Description |
 |---|---|---|---|---|
 | `path` | string | yes | — | Directory relative to project root |
-| `depth` | int 0–3 | no | 1 | **Validated but currently unused by the handler** |
+| `depth` | int 0–3 | no | 1 | Subdirectory listing depth; 0 hides the section |
 
 ```json
-{ "path": "src/services" }
+{ "path": "src/services", "depth": 2 }
 ```
 
 Output sections:
 
 - `Files: N total (X .ts, Y .cs, ...)` — from the index, grouped by extension.
 - `Key symbols:` — up to 20 symbols (name, kind, file:line).
-- `Subdirectories:` — read from disk, each with a recursive file count.
+- `Subdirectories:` — read from disk, nested up to `depth` levels (indented), each with a
+  recursive file count. `node_modules`, `.git`, `dist`, and `build` are never descended into.
 - `Top external/internal imports:` — up to 10 import sources by distinct-file count.
 
 Index lookups use `path LIKE '<dir>%'`, so pass the directory without a trailing slash
@@ -102,7 +103,7 @@ Grep-style reference search for a symbol name. File: `src/tools/find-usages.ts`.
 | `symbol_id` | int | no | Alternative way to supply name + definition location |
 
 The handler walks `PROJECT_ROOT` on disk (skipping `node_modules`, `.git`, `dist`,
-`build`), scans files with extensions `.ts .tsx .js .jsx .cs .mjs .cjs`, and matches a
+`build`), scans files with the extensions listed in `config.languageMap`, and matches a
 **word-boundary regex** on each line. When the definition is known (via `symbol_id` or
 `name` + `file_path`), the definition's own line range is skipped.
 
@@ -150,16 +151,28 @@ Trigger reindexing of the target project. File: `src/tools/reindex.ts` →
 | `full` | boolean | no | false | `true` = truncate all tables and rebuild |
 
 ```json
-{ "full": true }
+{ "full": false }
 ```
 
-Output: counts of scanned/parsed files, symbols, imports, exports, and duration.
+Output: counts of scanned, skipped, removed, and parsed files, symbols, imports, exports,
+and duration:
+
+```
+Reindex complete.
+Scanned: 730 files
+Skipped (unchanged): 712
+Removed (deleted from disk): 3
+Parsed: 15 files
+Symbols: 120
+Imports: 45
+Exports: 30
+Duration: 0.4s
+```
 
 Notes:
 
-- `full: false` ("incremental") still re-scans and re-parses **every** file; `mtime` is
-  never compared, and child rows are re-inserted without deleting old ones, so symbols can
-  duplicate. Prefer `full: true` when in doubt (see
-  [Known limitations](development.md#known-limitations)).
-- During a full reindex the tables are truncated first — queries against the index may
-  return empty results until it finishes.
+- `full: false` (incremental) skips files whose `mtime` is unchanged, prunes rows for
+  files deleted from disk, and re-indexes only new/changed files — old rows are deleted
+  before re-insert, so symbols never duplicate.
+- `full: true` truncates all tables first — queries against the index may return empty
+  results until it finishes.

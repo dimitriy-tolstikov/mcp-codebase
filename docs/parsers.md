@@ -109,10 +109,8 @@ Known accuracy limits (do not "fix" silently — see
    `ILanguageParser` (return `null` from `parse()` for files that should be skipped).
 2. **Register it** in `src/indexer/indexer.ts` next to the existing `registerParser(...)`
    calls.
-3. **Update the two hardcoded extension allowlists** so the file is picked up at runtime:
-   - watcher: `src/indexer/watcher.ts` (`handleChange`)
-   - usage search: `src/tools/find-usages.ts` (`searchDir`)
-4. **Declare the mapping** in `config.languageMap` (`src/config.ts`) — currently
-   informational (not read by code), but kept as the canonical extension → language list.
+3. **Add the extension to `config.languageMap`** (`src/config.ts`) — this drives the
+   fallback language and the extension allowlists used by the watcher
+   (`src/indexer/watcher.ts`) and `find_usages` (`src/tools/find-usages.ts`).
 
 Then run `npm run build` and reindex (`reindex` tool with `full: true`).

@@ -7,5 +7,5 @@ export const ReindexSchema = z.object({
 
 export async function handleReindex(args: z.infer<typeof ReindexSchema>): Promise<string> {
   const stats = await indexProject({ full: args.full });
-  return `Reindex complete.\nScanned: ${stats.scanned} files\nParsed: ${stats.parsed} files\nSymbols: ${stats.symbols}\nImports: ${stats.imports}\nExports: ${stats.exports}\nDuration: ${(stats.durationMs / 1000).toFixed(1)}s`;
+  return `Reindex complete.\nScanned: ${stats.scanned} files\nSkipped (unchanged): ${stats.skipped}\nRemoved (deleted from disk): ${stats.removed}\nParsed: ${stats.parsed} files\nSymbols: ${stats.symbols}\nImports: ${stats.imports}\nExports: ${stats.exports}\nDuration: ${(stats.durationMs / 1000).toFixed(1)}s`;
 }

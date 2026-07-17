@@ -65,8 +65,8 @@ src/
 │   └── repositories.ts      # All SQL: batch inserts (upserts), search queries
 ├── indexer/
 │   ├── file-crawler.ts      # Generator-based recursive file walk honoring .gitignore + ignore patterns
-│   ├── indexer.ts           # Parser registry + indexProject() + indexSingleFile()
-│   └── watcher.ts           # chokidar watch mode: reindex single files on add/change
+│   ├── indexer.ts           # Parser registry + indexProject() + indexSingleFile() + removeFileFromIndex()
+│   └── watcher.ts           # chokidar watch mode: reindex on add/change, delete row on unlink
 ├── parsers/
 │   ├── interface.ts         # ILanguageParser contract + SymbolInfo/ImportInfo/ExportInfo/ParseResult
 │   ├── typescript.ts        # TS/JS parser built on the TypeScript Compiler API
@@ -96,7 +96,8 @@ Startup sequence in `src/index.ts` (`main()`):
 1. `ensureDatabase()` connects to the `postgres` system DB and creates the target database
    if missing; `initSchema()` creates tables and indexes.
 2. If the `files` table is empty, a full initial index runs automatically.
-3. The chokidar watcher starts on `PROJECT_ROOT` and reindexes individual files on add/change.
+3. The chokidar watcher starts on `PROJECT_ROOT`: reindexes individual files on add/change,
+   removes them from the index on unlink.
 4. The MCP server connects over stdio and dispatches tool calls. Each tool's args are validated
    with its zod schema, the handler returns a plain-text result, and any thrown error is
    returned as `{ isError: true, content: [{ type: "text", text }] }`.
@@ -108,15 +109,18 @@ Indexing pipeline (`src/indexer/indexer.ts`):
 - `crawlFiles()` walks the tree, applying `.gitignore` plus `config.ignorePatterns`.
 - Files are parsed and flushed in batches (`config.batchSize` = 1000 files; symbol/import/export
   inserts are sub-batched at 500 rows to stay under PostgreSQL's parameter limit).
-- Each batch is written in one transaction; file rows upsert `ON CONFLICT (path)`.
-- Full reindex truncates all four tables first; incremental reindex just re-upserts everything
-  (see "Known limitations").
+- Each batch is written in one transaction: the batch's file rows are deleted first
+  (cascading to symbols/imports/exports, so re-indexing never duplicates), then file rows
+  upsert `ON CONFLICT (path)`; exports are linked to symbols (`exports.symbol_id`).
+- Full reindex truncates all four tables first. Incremental reindex skips files with
+  unchanged `mtime`, prunes rows for files deleted from disk, and re-indexes only
+  new/changed files.
 
 Database schema (all in `src/db/schema.ts`): `files` (path unique, extension, language, size,
 line_count, mtime), `symbols` (FK to files, name, kind, position, signature, docstring,
 modifiers as JSON text), `imports` (source, names as JSON text, is_type_only), `exports`
-(name, is_default, is_reexport, source). Symbol search ranks by exact match, then
-`similarity()` via the `pg_trgm` GIN index.
+(name, is_default, is_reexport, source, symbol_id FK). Symbol search ranks by exact match,
+then `similarity()` via the `pg_trgm` GIN index.
 
 ## Configuration
 
@@ -132,7 +136,8 @@ config file and no dotenv loading — the MCP host supplies env (as in `kimi-mcp
 
 `config.ts` also holds hardcoded tuning: `ignorePatterns` (node_modules, dist, build, .git,
 bin, obj, .vs, packages, coverage, .next, `*.min.js`, `*.map`), `languageMap`
-(extension → language), `batchSize`, `watchDebounceMs`, `periodicCheckMs`.
+(extension → language; also drives the watcher and `find_usages` extension allowlists),
+`batchSize`, `watchDebounceMs` (watcher `awaitWriteFinish` threshold).
 
 ## Code style and conventions
 
@@ -160,8 +165,9 @@ bin, obj, .vs, packages, coverage, .next, `*.min.js`, `*.map`), `languageMap`
 1. Create a class implementing `ILanguageParser` (`supportedExtensions`, `languageId`, `parse()`)
    in `src/parsers/`.
 2. Register it in `src/indexer/indexer.ts` next to the existing `registerParser(...)` calls.
-3. Add the extension to `config.languageMap` in `src/config.ts` and to the watcher's extension
-   allowlist in `src/indexer/watcher.ts` (and the one in `src/tools/find-usages.ts`).
+3. Add the extension to `config.languageMap` in `src/config.ts` — it automatically drives
+   the extension allowlists in the watcher (`src/indexer/watcher.ts`) and `find_usages`
+   (`src/tools/find-usages.ts`).
 
 **Add an MCP tool:**
 
@@ -197,15 +203,8 @@ go in `src/db/repositories.ts`.
 
 ## Known limitations (be careful not to "fix" these silently)
 
-- **Incremental reindex does not use mtime.** `indexProject({ full: false })` skips the
-  truncate but still re-scans and re-upserts every file; `mtime` is recorded but never compared.
-  The README's "incremental (by mtime)" describes intent, not current behavior.
-- **File deletions are not removed from the index.** The watcher's `unlink` handler only logs;
-  stale rows persist until a full reindex.
 - **The C# parser is heuristic** (regex-based, line-oriented): it can produce false positives
   (e.g. local variables indexed as fields) and misses non-trivial syntax.
 - `find_usages` is plain text search (word-boundary regex), not semantic reference resolution.
 - `get_module_dependencies` finds "used by" files via a `LIKE` match on import sources —
   a heuristic, not a resolved module graph.
-- `config.periodicCheckMs`, `copyThreshold`, and `watchDebounceMs` exist in config but are not
-  all wired into behavior (e.g. no periodic check is scheduled).

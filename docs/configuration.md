@@ -37,14 +37,12 @@ Example host configuration (`kimi-mcp.json`):
 
 ## Hardcoded tuning in `src/config.ts`
 
-| Key | Value | Used? | Notes |
-|---|---|---|---|
-| `ignorePatterns` | see list below | ✅ | Added on top of the target project's `.gitignore` during crawl |
-| `languageMap` | ext → language | ⚠️ | **Currently not consumed by any code.** A file's stored `language` comes from the parser result (or the extension when unparsed). Kept as the canonical extension → language declaration |
-| `batchSize` | `1000` | ✅ | Files per flush transaction in `indexProject()` |
-| `copyThreshold` | `5000` | ❌ | Defined but unused |
-| `watchDebounceMs` | `300` | ❌ | Defined but unused — the watcher uses its own hardcoded `awaitWriteFinish` (300 ms stability, 100 ms poll) |
-| `periodicCheckMs` | `300000` (5 min) | ❌ | Defined but unused — no periodic check is scheduled |
+| Key | Value | Purpose |
+|---|---|---|
+| `ignorePatterns` | see list below | Added on top of the target project's `.gitignore` during crawl |
+| `languageMap` | ext → language | Fallback `language` for files without a parser result; also defines the extension allowlists used by the watcher and `find_usages` |
+| `batchSize` | `1000` | Files per flush transaction in `indexProject()` |
+| `watchDebounceMs` | `300` | Watcher `awaitWriteFinish` stability threshold (ms) |
 
 `ignorePatterns`:
 
@@ -56,16 +54,17 @@ bin/**  obj/**  .vs/**  packages/**  coverage/**  .next/**
 `languageMap`:
 
 ```
-.ts .tsx .js .jsx .mjs .cjs → typescript
-.cs                         → csharp
+.ts .tsx .js .jsx .mjs .cjs .mts → typescript
+.cs                              → csharp
 ```
 
 ## Watcher ignore list
 
 The chokidar watcher (`src/indexer/watcher.ts`) has its own, separate ignore list —
-dotfiles (regex), `node_modules`, `dist`, `build`, `*.min.js`, `*.map` — and its own
-extension allowlist for reindexing: `.ts .tsx .js .jsx .cs .mjs .cjs`. Changing
-`config.ignorePatterns` does **not** affect the watcher.
+dotfiles (regex), `node_modules`, `dist`, `build`, `*.min.js`, `*.map` — and reindexes
+only the extensions from `config.languageMap` on add/change. Changing
+`config.ignorePatterns` does **not** affect the watcher; extending `config.languageMap`
+does.
 
 ## Connection pool
 

@@ -31,11 +31,10 @@ export const config = {
     '.jsx': 'typescript',
     '.mjs': 'typescript',
     '.cjs': 'typescript',
+    '.mts': 'typescript',
     '.cs': 'csharp',
   } as Record<string, string>,
 
   batchSize: 1000,
-  copyThreshold: 5000,
   watchDebounceMs: 300,
-  periodicCheckMs: 5 * 60 * 1000,
 };
