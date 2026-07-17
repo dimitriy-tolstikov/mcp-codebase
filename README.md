@@ -1,54 +1,56 @@
 # MCP Codebase Server
 
-MCP сервер для семантической навигации по кодовой базе. Строит AST-индекс символов, импортов и экспортов, предоставляя высокоуровневые инструменты для ИИ-агента.
+[Русская версия](README.ru.md)
 
-## Возможности
+MCP server for semantic codebase navigation. Builds an AST index of symbols, imports, and exports, providing high-level tools for an AI agent.
 
-- **Поиск символов** — ищет функции, классы, интерфейсы, методы и др. по имени с поддержкой wildcard (`*`, `?`) и OR (`|`)
-- **Детали символа** — показывает исходный код, сигнатуру, документацию, импорты файла
-- **Обзор модуля** — структура директории, ключевые символы, поддиректории, топ импортов
-- **Поиск использований** — находит все ссылки на символ в проекте
-- **Зависимости модуля** — импорты, экспорты, файлы, которые используют данный модуль
-- **Переиндексация** — полная или инкрементальная (по mtime)
-- **Watch mode** — автоматическое обновление индекса при изменении файлов
+## Features
 
-## Поддерживаемые языки
+- **Symbol search** — finds functions, classes, interfaces, methods, etc. by name with wildcard (`*`, `?`) and OR (`|`) support
+- **Symbol details** — shows source code, signature, documentation, and file imports
+- **Module overview** — directory structure, key symbols, subdirectories, top imports
+- **Usage search** — finds all references to a symbol in the project
+- **Module dependencies** — imports, exports, and files that use the given module
+- **Reindexing** — full or incremental (by mtime)
+- **Watch mode** — automatic index updates when files change
 
-| Язык | Парсер | Символы | Импорты | Экспорты |
-|------|--------|---------|---------|----------|
+## Supported Languages
+
+| Language | Parser | Symbols | Imports | Exports |
+|----------|--------|---------|---------|----------|
 | TypeScript / JavaScript | TypeScript Compiler API | ✅ | ✅ | ✅ |
 | C# | Regex-based (lightweight) | ✅ | ✅ (using) | ✅ (public) |
 
-Архитектура позволяет легко добавлять новые языки через интерфейс `ILanguageParser`.
+The architecture makes it easy to add new languages via the `ILanguageParser` interface.
 
-## Требования
+## Requirements
 
 - Node.js 18+
 - PostgreSQL 14+
 
-## Установка
+## Installation
 
 ```bash
 npm install
 npm run build
 ```
 
-## Настройка
+## Configuration
 
-Переменные окружения:
+Environment variables:
 
-| Переменная | Описание | По умолчанию |
+| Variable | Description | Default |
 |------------|----------|--------------|
-| `PROJECT_ROOT` | Корневая директория проекта | `process.cwd()` |
-| `PGHOST` | Хост PostgreSQL | `localhost` |
-| `PGPORT` | Порт PostgreSQL | `5432` |
-| `PGDATABASE` | Имя базы данных | `codebase_index` |
-| `PGUSER` | Пользователь PostgreSQL | `postgres` |
-| `PGPASSWORD` | Пароль PostgreSQL | `postgres` |
+| `PROJECT_ROOT` | Project root directory | `process.cwd()` |
+| `PGHOST` | PostgreSQL host | `localhost` |
+| `PGPORT` | PostgreSQL port | `5432` |
+| `PGDATABASE` | Database name | `codebase_index` |
+| `PGUSER` | PostgreSQL user | `postgres` |
+| `PGPASSWORD` | PostgreSQL password | `postgres` |
 
-## Интеграция с Kimi CLI
+## Integration with Kimi CLI
 
-Добавьте в `kimi-mcp.json`:
+Add to `kimi-mcp.json`:
 
 ```json
 {
@@ -69,10 +71,10 @@ npm run build
 }
 ```
 
-## Инструменты MCP
+## MCP Tools
 
 ### `search_symbols`
-Поиск символов по имени с фильтрацией.
+Search symbols by name with filtering.
 
 ```json
 {
@@ -85,60 +87,60 @@ npm run build
 ```
 
 ### `get_symbol_details`
-Полная информация о символе.
+Full information about a symbol.
 
 ```json
 { "symbol_id": 123 }
-// или
+// or
 { "name": "UserService", "file_path": "src/services/UserService.ts" }
 ```
 
 ### `explore_module`
-Обзор директории.
+Directory overview.
 
 ```json
 { "path": "src/services", "depth": 1 }
 ```
 
 ### `find_usages`
-Поиск использований символа.
+Find symbol usages.
 
 ```json
 { "name": "UserService", "file_path": "src/services/UserService.ts" }
 ```
 
 ### `get_module_dependencies`
-Граф зависимостей файла.
+File dependency graph.
 
 ```json
 { "path": "src/services/UserService.ts" }
 ```
 
 ### `reindex`
-Принудительная переиндексация.
+Force reindexing.
 
 ```json
 { "full": false }
 ```
 
-## Архитектура
+## Architecture
 
 ```
 src/
 ├── index.ts                 # MCP server
-├── config.ts                # Конфигурация
+├── config.ts                # Configuration
 ├── db/
-│   ├── connection.ts        # Пул PostgreSQL
-│   ├── schema.ts            # DDL и миграции
-│   └── repositories.ts      # Запросы к БД
+│   ├── connection.ts        # PostgreSQL pool
+│   ├── schema.ts            # DDL and migrations
+│   └── repositories.ts      # Database queries
 ├── indexer/
-│   ├── file-crawler.ts      # Обход файлов
-│   ├── indexer.ts           # Оркестрация индексации
+│   ├── file-crawler.ts      # File traversal
+│   ├── indexer.ts           # Indexing orchestration
 │   └── watcher.ts           # Watch mode (chokidar)
 ├── parsers/
 │   ├── interface.ts         # ILanguageParser
-│   ├── typescript.ts        # TS/JS парсер
-│   └── csharp.ts            # C# парсер
+│   ├── typescript.ts        # TS/JS parser
+│   └── csharp.ts            # C# parser
 ├── tools/
 │   ├── search-symbols.ts
 │   ├── symbol-details.ts
@@ -151,20 +153,20 @@ src/
     └── paths.ts
 ```
 
-## Производительность
+## Performance
 
-На проекте `lowcodeplatform` (~71K файлов, ~730 исходных файлов без node_modules/dist):
-- Полная индексация: ~1.3 сек
-- Символов в индексе: ~5000
-- Поиск символа: < 50 мс
+On the `lowcodeplatform` project (~71K files, ~730 source files excluding node_modules/dist):
+- Full indexing: ~1.3 sec
+- Symbols in the index: ~5000
+- Symbol search: < 50 ms
 
-## Расширение на другие языки
+## Extending to Other Languages
 
-1. Создайте класс, реализующий `ILanguageParser`
-2. Зарегистрируйте его в `src/indexer/indexer.ts`
-3. Добавьте расширение в `config.languageMap`
+1. Create a class implementing `ILanguageParser`
+2. Register it in `src/indexer/indexer.ts`
+3. Add the extension to `config.languageMap`
 
-Пример:
+Example:
 ```typescript
 export class PythonParser implements ILanguageParser {
   readonly supportedExtensions = ['.py'];
