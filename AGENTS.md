@@ -5,15 +5,27 @@ Guidance for AI coding agents working in this repository. Assumes no prior knowl
 ## Documentation workflow (required)
 
 Detailed project documentation lives in `docs/` as Markdown files (start from `docs/README.md`).
-For every task, follow this workflow:
 
-1. **Read the docs first.** Before starting a task, read the parts of `docs/` related to the
-   task, and only then do the work.
-2. **Docs must match the code.** If you find a discrepancy between the documentation and the
+**Docs before code — a hard sequencing rule, not a suggestion.** When you receive a task,
+your FIRST tool calls must read the task-relevant files under `docs/` — before reading any
+source file, searching the codebase, or running commands. Reading only `docs/README.md`
+(the index) is not enough; read the specific documents for your task type in full:
+
+- Tool behavior (`src/tools/`, SQL queries) → `docs/tools.md` + `docs/database.md`
+- Indexing, watcher, startup, configuration → `docs/architecture.md` + `docs/configuration.md`
+- Parsers, adding a language → `docs/parsers.md`
+- Adding an MCP tool → `docs/tools.md` + `docs/development.md`
+- Cross-cutting features → every document the feature touches; when in doubt, read all
+  seven files in `docs/` — the folder is small.
+
+In your first reply to the user, name the documents you read (one short line) so compliance
+is verifiable. Only then proceed:
+
+1. **Docs must match the code.** If you find a discrepancy between the documentation and the
    actual code, update the documentation to reflect the code.
-3. **Keep docs current.** After any code change, update the affected documentation in `docs/`
+2. **Keep docs current.** After any code change, update the affected documentation in `docs/`
    as part of the same change — a task is not done until the documentation is updated.
-4. **Commit and push.** When the task is complete (code + docs), commit with a clear message
+3. **Commit and push.** When the task is complete (code + docs), commit with a clear message
    and push to the remote repository.
 
 ## Project overview
