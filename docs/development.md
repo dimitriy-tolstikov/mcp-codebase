@@ -29,14 +29,25 @@ src/
 │   ├── file-crawler.ts      # Generator-based file walk honoring ignore rules
 │   ├── indexer.ts           # Parser registry + indexProject() + indexSingleFile()
 │   └── watcher.ts           # chokidar watch mode
+├── lsp/
+│   ├── client.ts            # LspClient: stdio JSON-RPC to a language server
+│   ├── backend.ts           # ILspBackend contract + capability set
+│   ├── tsserver-backend.ts  # typescript-language-server backend (TS/JS)
+│   ├── csharp-backend.ts    # csharp-ls backend (C#; needs .NET SDK)
+│   ├── registry.ts          # backendForFile() + lazy lifecycle + shutdownAll()
+│   ├── edits.ts             # applyWorkspaceEdit() + dryRun + reindex hook
+│   └── positions.ts         # path↔URI, 1-based→0-based positions, edit offsets
 ├── parsers/
 │   ├── interface.ts         # ILanguageParser + data types
 │   ├── typescript.ts        # TS/JS parser (TypeScript Compiler API)
 │   └── csharp.ts            # Regex-based C# parser
 ├── tools/                   # One file per MCP tool (zod schema + handler)
+│   ├── refactor/            # LSP-backed refactoring tools (rename, move, ...)
+│   └── tool-stats.ts        # get_tool_stats telemetry tool
 └── utils/
     ├── gitignore.ts         # loadGitignore()
-    └── paths.ts             # Path normalization helpers
+    ├── paths.ts             # Path normalization helpers
+    └── stats.ts             # Tool telemetry: call/error counters + error log
 ```
 
 `dist/` is build output (gitignored). `kimi-mcp.json` is an example MCP host config.
@@ -57,12 +68,14 @@ src/
 
 ## Adding an MCP tool
 
-1. Create `src/tools/<name>.ts` exporting a zod schema and `handle<Name>(args):
-   Promise<string>`.
+1. Create `src/tools/<name>.ts` (or `src/tools/refactor/<name>.ts` for LSP-backed tools)
+   exporting a zod schema and `handle<Name>(args): Promise<string>`.
 2. Register the tool definition in the `TOOLS` array in `src/index.ts` (name, description,
    JSON Schema for inputs).
-3. Add a `case` to the `CallToolRequestSchema` switch: parse args with the zod schema,
-   call the handler, return `{ content: [{ type: "text", text }] }`.
+3. Add an entry to the `TOOL_HANDLERS` map in `src/index.ts` (schema + handler). The
+   dispatcher validates args, wraps execution with telemetry (`recordCall` /
+   `recordError` from `src/utils/stats.ts`), and returns
+   `{ content: [{ type: "text", text }] }`.
 
 Errors thrown by the handler are converted to `isError` responses by the dispatcher —
 return user-facing problems (e.g. "not found") as plain text instead of throwing.
@@ -104,3 +117,18 @@ behavior changes:
   resolution.
 - **`get_module_dependencies` "used by" is a `LIKE` heuristic** on import sources, not a
   resolved module graph.
+- **C# refactoring tools need the .NET SDK and the `csharp-ls` dotnet tool** installed on
+  the machine; without them the C# LSP backend fails with a friendly error (the server
+  itself keeps running).
+- **`extract_method` availability is server-driven**: whether a range can be extracted
+  depends on what the language server offers for that exact selection; some offered
+  refactorings require an interactive name prompt that cannot be fulfilled
+  non-interactively (apply the refactoring, then use `rename_symbol`). No regex-based
+  emulation is done.
+- **`move_file` for C# is partial**: the file is moved and reindexed, but namespace/using
+  updates across the project are not guaranteed — verify with `get_diagnostics` after.
+- **Cross-file rename may need a warm-up**: tsserver loads the project asynchronously
+  after the first `didOpen`; `rename_symbol` retries the rename request until the edit
+  set stabilizes to avoid missing not-yet-loaded files.
+- **`get_diagnostics` project-wide mode** only reports diagnostics already published by
+  running language servers — it neither opens files nor starts backends.

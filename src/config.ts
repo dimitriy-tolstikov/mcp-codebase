@@ -37,4 +37,12 @@ export const config = {
 
   batchSize: 1000,
   watchDebounceMs: 300,
+
+  lsp: {
+    enabled: process.env.LSP_ENABLED !== 'false',
+    tsserverCmd: process.env.TSSERVER_CMD,
+    csharpLsCmd: process.env.CSHARPLS_CMD || 'csharp-ls',
+    startupTimeoutMs: parseInt(process.env.LSP_STARTUP_TIMEOUT_MS || '60000', 10),
+    requestTimeoutMs: parseInt(process.env.LSP_REQUEST_TIMEOUT_MS || '30000', 10),
+  },
 };

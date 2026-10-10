@@ -114,3 +114,19 @@ Known accuracy limits (do not "fix" silently — see
    (`src/indexer/watcher.ts`) and `find_usages` (`src/tools/find-usages.ts`).
 
 Then run `npm run build` and reindex (`reindex` tool with `full: true`).
+
+## Parsers vs the LSP layer
+
+There are two, deliberately separate, language-aware subsystems:
+
+- **Parsers (this document)** feed the *index*: fast, offline, approximate (regex for C#),
+  used by the navigation tools (`search_symbols`, `get_symbol_details`, ...) and the
+  watcher. They never talk to a language server.
+- **LSP backends (`src/lsp/`)** power the *refactoring* tools (`rename_symbol`,
+  `get_diagnostics`, `move_file`, `organize_imports`, `fix_all`, `extract_method`):
+  precise and semantic, but heavyweight — a real language server process per language,
+  started lazily on first use.
+
+Adding a language to the index (parser) does not give it refactoring support; that
+requires an additional `ILspBackend` implementation and a registration in
+`src/lsp/registry.ts` (`backendForFile`).

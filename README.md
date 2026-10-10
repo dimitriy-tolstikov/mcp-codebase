@@ -13,6 +13,13 @@ MCP server for semantic codebase navigation. Builds an AST index of symbols, imp
 - **Module dependencies** — imports, exports, and files that use the given module
 - **Reindexing** — full or incremental (by mtime)
 - **Watch mode** — automatic index updates when files change
+- **Semantic refactoring** (LSP-backed, via real language servers): `rename_symbol`,
+  `get_diagnostics`, `move_file`, `organize_imports`, `fix_all`, `extract_method` — all
+  with `dryRun` support and automatic reindex of changed files
+- **Tool telemetry** — `get_tool_stats` shows per-tool call/error counters for the running
+  server process
+
+13 MCP tools in total: 6 navigation, 6 refactoring, 1 telemetry.
 
 ## Supported Languages
 
@@ -27,6 +34,7 @@ The architecture makes it easy to add new languages via the `ILanguageParser` in
 
 - Node.js 18+
 - PostgreSQL 14+
+- For C# refactoring tools: .NET SDK + the `csharp-ls` dotnet tool (TS/JS refactoring works out of the box via the bundled `typescript-language-server`)
 
 ## Installation
 
@@ -123,6 +131,22 @@ Force reindexing.
 { "full": false }
 ```
 
+### Refactoring tools (LSP-backed)
+
+Require a language server for the file type (TS/JS out of the box; C# needs `csharp-ls`).
+All accept `dryRun: true` to preview edits without writing.
+
+- `rename_symbol` — `{ "file_path": "src/util.ts", "line": 12, "column": 17, "new_name": "hello" }`
+- `get_diagnostics` — `{ "file_path": "src/util.ts", "severity": "error" }` (omit `file_path` for all stored diagnostics)
+- `move_file` — `{ "old_path": "src/a.ts", "new_path": "src/lib/a.ts" }`
+- `organize_imports` — `{ "file_path": "src/a.ts" }`
+- `fix_all` — `{ "file_path": "src/a.ts" }`
+- `extract_method` — `{ "file_path": "src/a.ts", "start_line": 10, "end_line": 20, "new_name": "helper" }`
+- `get_tool_stats` — `{}` (per-tool call/error counters)
+
+LSP env vars: `LSP_ENABLED`, `TSSERVER_CMD`, `CSHARPLS_CMD`, `LSP_STARTUP_TIMEOUT_MS`,
+`LSP_REQUEST_TIMEOUT_MS`, `MCP_ERROR_LOG` — see `docs/configuration.md`.
+
 ## Architecture
 
 ```
@@ -141,16 +165,28 @@ src/
 │   ├── interface.ts         # ILanguageParser
 │   ├── typescript.ts        # TS/JS parser
 │   └── csharp.ts            # C# parser
+├── lsp/
+│   ├── client.ts            # LSP client over stdio
+│   ├── backend.ts           # ILspBackend contract
+│   ├── tsserver-backend.ts  # typescript-language-server
+│   ├── csharp-backend.ts    # csharp-ls (needs .NET SDK)
+│   ├── registry.ts          # backend lifecycle
+│   ├── edits.ts             # WorkspaceEdit application
+│   └── positions.ts         # path↔URI, positions
 ├── tools/
 │   ├── search-symbols.ts
 │   ├── symbol-details.ts
 │   ├── explore-module.ts
 │   ├── find-usages.ts
 │   ├── module-deps.ts
-│   └── reindex.ts
+│   ├── reindex.ts
+│   ├── tool-stats.ts
+│   └── refactor/            # rename-symbol, get-diagnostics, move-file,
+│                            # organize-imports, fix-all, extract-method
 └── utils/
     ├── gitignore.ts
-    └── paths.ts
+    ├── paths.ts
+    └── stats.ts             # tool telemetry
 ```
 
 ## Performance

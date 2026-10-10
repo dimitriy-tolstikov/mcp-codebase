@@ -50,12 +50,52 @@ stdout** — the MCP protocol owns that channel; all logging uses `console.error
 ## Tool dispatch
 
 - `ListToolsRequestSchema` returns the static `TOOLS` array (name, description, JSON Schema).
-- `CallToolRequestSchema` switches on the tool name, validates `arguments` with the tool's
-  zod schema, and calls the handler (`handle*` in `src/tools/<name>.ts`).
+- `CallToolRequestSchema` looks the tool up in the `TOOL_HANDLERS` map (name → zod schema +
+  handler), validates `arguments`, and calls the handler (`handle*` in `src/tools/<name>.ts`
+  or `src/tools/refactor/<name>.ts`).
+- Telemetry is centralized in the dispatcher (`src/utils/stats.ts`): on success
+  `recordCall(name)` increments an in-memory counter; on a thrown error
+  `recordError(name, err, args)` increments the error counter and appends a line
+  (timestamp, tool, JSON args, message, stack) to the error log (`MCP_ERROR_LOG`, default
+  `<PROJECT_ROOT>/.mcp-codebase-errors.log`). Logging failures never crash the server.
+  The `get_tool_stats` tool exposes the counters as a plain-text table.
 - Handlers return a plain-text string, wrapped as `{ content: [{ type: "text", text }] }`.
 - Any thrown error (including zod validation failures) is caught and returned as
   `{ isError: true, content: [{ type: "text", text: "Error: ..." }] }` — tool errors never
   crash the server.
+
+## LSP layer
+
+`src/lsp/` adds semantic, language-server-backed operations on top of (and independent of)
+the AST indexing pipeline:
+
+- `client.ts` — `LspClient`: spawns a language server over stdio and speaks JSON-RPC via
+  `vscode-jsonrpc` (`createMessageConnection` with `StreamMessageReader/Writer`). Handles
+  `initialize`/`initialized`, `didOpen`/`didChange` (always full-content sync from disk),
+  stores `publishDiagnostics` per URI, applies `LSP_STARTUP_TIMEOUT_MS` /
+  `LSP_REQUEST_TIMEOUT_MS`, and shuts the server down gracefully.
+- `backend.ts` — `ILspBackend`: `languageId`, `extensions`, `capabilities`
+  (a `Set` of `rename | move_file | organize_imports | fix_all | extract_method |
+  diagnostics`), `ensureStarted()`, `client`.
+- `tsserver-backend.ts` — spawns `typescript-language-server --stdio` (resolved from this
+  package's `node_modules/.bin`, overridable via `TSSERVER_CMD`).
+- `csharp-backend.ts` — spawns `csharp-ls` (`CSHARPLS_CMD`); checks availability with
+  `--version` first and throws a friendly install-the-.NET-SDK error if missing. The MCP
+  server keeps running — the error surfaces as an `isError` tool response.
+- `registry.ts` — `backendForFile(absPath)` returns the lazily-created singleton backend
+  per extension; `getStartedBackends()` for project-wide diagnostics; `shutdownAll()` is
+  called from the SIGINT/SIGTERM handlers.
+- `edits.ts` — `applyWorkspaceEdit(edit, { dryRun })`: applies `TextEdit`s per file by
+  reading the file, applying edits sorted from end-of-file backwards (offsets never shift),
+  writing back; then syncs changed documents to the LSP server and reindexes each changed
+  file via `indexSingleFile()`. Returns a human-readable per-file report (edit count +
+  preview of first changed lines). `dryRun` computes the same report without writing.
+- `positions.ts` — path ↔ `file://` URI conversion, 1-based tool line/column → 0-based LSP
+  positions, and offset arithmetic for applying `TextEdit`s.
+
+Backends are **lazy**: no language server starts at MCP server startup — only on the first
+refactoring tool call for a file of that language. `LSP_ENABLED=false` disables the whole
+layer (tools return a text error).
 
 ## Indexing pipeline
 
@@ -111,4 +151,5 @@ The watcher is a singleton; a second `startWatcher()` call is a no-op.
 
 ## Shutdown
 
-`SIGINT` and `SIGTERM` both run `stopWatcher()` then `closePool()` and exit 0.
+`SIGINT` and `SIGTERM` both run `stopWatcher()`, then `shutdownAll()` (graceful shutdown of
+any started language servers), then `closePool()`, and exit 0.

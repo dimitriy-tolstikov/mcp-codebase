@@ -13,7 +13,12 @@
     "start": "node dist/index.js",
     "prepare": "npm run build"
   },
-  "keywords": ["mcp", "codebase", "indexing", "navigation"],
+  "keywords": [
+    "mcp",
+    "codebase",
+    "indexing",
+    "navigation"
+  ],
   "license": "MIT",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.4",
@@ -21,6 +26,9 @@
     "ignore": "^6.0.0",
     "pg": "^8.13.0",
     "typescript": "^5.6.0",
+    "typescript-language-server": "^6.0.2",
+    "vscode-jsonrpc": "^9.0.3",
+    "vscode-languageserver-protocol": "^3.18.4",
     "zod": "^3.23.8"
   },
   "devDependencies": {

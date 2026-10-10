@@ -13,6 +13,13 @@ MCP сервер для семантической навигации по ко�
 - **Зависимости модуля** — импорты, экспорты, файлы, которые используют данный модуль
 - **Переиндексация** — полная или инкрементальная (по mtime)
 - **Watch mode** — автоматическое обновление индекса при изменении файлов
+- **Семантический рефакторинг** (через language servers, LSP): `rename_symbol`,
+  `get_diagnostics`, `move_file`, `organize_imports`, `fix_all`, `extract_method` — все
+  с поддержкой `dryRun` и автоматической переиндексацией изменённых файлов
+- **Телеметрия инструментов** — `get_tool_stats` показывает счётчики вызовов/ошибок
+  по каждому инструменту за время жизни процесса
+
+Всего 13 MCP-инструментов: 6 навигационных, 6 рефакторинга, 1 телеметрия.
 
 ## Поддерживаемые языки
 
@@ -27,6 +34,7 @@ MCP сервер для семантической навигации по ко�
 
 - Node.js 18+
 - PostgreSQL 14+
+- Для инструментов рефакторинга C#: .NET SDK + dotnet tool `csharp-ls` (для TS/JS работает из коробки через bundled `typescript-language-server`)
 
 ## Установка
 
@@ -123,6 +131,22 @@ npm run build
 { "full": false }
 ```
 
+### Инструменты рефакторинга (через LSP)
+
+Требуют language server для типа файла (TS/JS из коробки; для C# нужен `csharp-ls`).
+Все принимают `dryRun: true` для предпросмотра правок без записи.
+
+- `rename_symbol` — `{ "file_path": "src/util.ts", "line": 12, "column": 17, "new_name": "hello" }`
+- `get_diagnostics` — `{ "file_path": "src/util.ts", "severity": "error" }` (без `file_path` — все сохранённые диагностики)
+- `move_file` — `{ "old_path": "src/a.ts", "new_path": "src/lib/a.ts" }`
+- `organize_imports` — `{ "file_path": "src/a.ts" }`
+- `fix_all` — `{ "file_path": "src/a.ts" }`
+- `extract_method` — `{ "file_path": "src/a.ts", "start_line": 10, "end_line": 20, "new_name": "helper" }`
+- `get_tool_stats` — `{}` (счётчики вызовов/ошибок по инструментам)
+
+Переменные окружения LSP: `LSP_ENABLED`, `TSSERVER_CMD`, `CSHARPLS_CMD`,
+`LSP_STARTUP_TIMEOUT_MS`, `LSP_REQUEST_TIMEOUT_MS`, `MCP_ERROR_LOG` — см. `docs/configuration.md`.
+
 ## Архитектура
 
 ```
@@ -141,16 +165,28 @@ src/
 │   ├── interface.ts         # ILanguageParser
 │   ├── typescript.ts        # TS/JS парсер
 │   └── csharp.ts            # C# парсер
+├── lsp/
+│   ├── client.ts            # LSP-клиент по stdio
+│   ├── backend.ts           # Контракт ILspBackend
+│   ├── tsserver-backend.ts  # typescript-language-server
+│   ├── csharp-backend.ts    # csharp-ls (нужен .NET SDK)
+│   ├── registry.ts          # Жизненный цикл бэкендов
+│   ├── edits.ts             # Применение WorkspaceEdit
+│   └── positions.ts         # path↔URI, позиции
 ├── tools/
 │   ├── search-symbols.ts
 │   ├── symbol-details.ts
 │   ├── explore-module.ts
 │   ├── find-usages.ts
 │   ├── module-deps.ts
-│   └── reindex.ts
+│   ├── reindex.ts
+│   ├── tool-stats.ts
+│   └── refactor/            # rename-symbol, get-diagnostics, move-file,
+│                            # organize-imports, fix-all, extract-method
 └── utils/
     ├── gitignore.ts
-    └── paths.ts
+    ├── paths.ts
+    └── stats.ts             # телеметрия инструментов
 ```
 
 ## Производительность

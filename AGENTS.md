@@ -32,7 +32,7 @@ is verifiable. Only then proceed:
 
 `mcp-codebase` is an **MCP (Model Context Protocol) server** that gives an AI agent semantic
 navigation over a codebase. It crawls a target project, parses source files into symbols,
-imports, and exports, stores them in **PostgreSQL**, and exposes six high-level MCP tools
+imports, and exports, stores them in **PostgreSQL**, and exposes thirteen high-level MCP tools
 over **stdio**:
 
 - `search_symbols` — find symbols by name with wildcards (`*`, `?`), OR (`|`), and fuzzy
@@ -42,6 +42,13 @@ over **stdio**:
 - `find_usages` — grep-style reference search for a symbol name across the project.
 - `get_module_dependencies` — what a file imports, what it exports, which files import it.
 - `reindex` — full or incremental reindex of the target project.
+- `rename_symbol` — LSP-backed semantic rename across the project.
+- `get_diagnostics` — compiler/linter diagnostics from the language server (file or stored project-wide).
+- `move_file` — move/rename a file with import updates (TS/JS full; C# move-only).
+- `organize_imports` — remove unused + sort imports via the language server.
+- `fix_all` — apply all auto-fixable diagnostics in a file.
+- `extract_method` — extract a line range into a new method/function.
+- `get_tool_stats` — per-tool call/error telemetry counters (read-only).
 
 Note: this server indexes an *external* codebase (pointed at by `PROJECT_ROOT`), not itself.
 
@@ -52,7 +59,8 @@ Note: this server indexes an *external* codebase (pointed at by `PROJECT_ROOT`),
 - **PostgreSQL 14+** with the `pg_trgm` extension (created automatically) for fuzzy symbol search.
 - Key dependencies: `@modelcontextprotocol/sdk` (stdio transport), `pg` (connection pool),
   `typescript` (TS/JS parsing via the Compiler API), `chokidar` (watch mode), `ignore`
-  (.gitignore handling), `zod` (tool input validation).
+  (.gitignore handling), `zod` (tool input validation), `vscode-jsonrpc` +
+  `vscode-languageserver-protocol` + `typescript-language-server` (LSP refactoring layer).
 
 ## Build and run commands
 
@@ -79,6 +87,14 @@ src/
 │   ├── file-crawler.ts      # Generator-based recursive file walk honoring .gitignore + ignore patterns
 │   ├── indexer.ts           # Parser registry + indexProject() + indexSingleFile() + removeFileFromIndex()
 │   └── watcher.ts           # chokidar watch mode: reindex on add/change, delete row on unlink
+├── lsp/
+│   ├── client.ts            # LspClient: stdio JSON-RPC (vscode-jsonrpc), didOpen/didChange, diagnostics store
+│   ├── backend.ts           # ILspBackend: languageId, extensions, capabilities, ensureStarted()
+│   ├── tsserver-backend.ts  # typescript-language-server --stdio (TS/JS)
+│   ├── csharp-backend.ts    # csharp-ls (C#; friendly error when .NET/csharp-ls missing)
+│   ├── registry.ts          # backendForFile() singletons, lazy start, getStartedBackends(), shutdownAll()
+│   ├── edits.ts             # applyWorkspaceEdit(): TextEdits end-of-file backwards, dryRun report, reindex hook
+│   └── positions.ts         # path↔file:// URI, 1-based tool positions → 0-based LSP, offset math
 ├── parsers/
 │   ├── interface.ts         # ILanguageParser contract + SymbolInfo/ImportInfo/ExportInfo/ParseResult
 │   ├── typescript.ts        # TS/JS parser built on the TypeScript Compiler API
@@ -89,10 +105,14 @@ src/
 │   ├── explore-module.ts
 │   ├── find-usages.ts
 │   ├── module-deps.ts
-│   └── reindex.ts
+│   ├── reindex.ts
+│   ├── tool-stats.ts        # get_tool_stats telemetry tool
+│   └── refactor/            # LSP-backed tools: common.ts helper + rename-symbol, get-diagnostics,
+│                            # move-file, organize-imports, fix-all, extract-method
 └── utils/
     ├── gitignore.ts         # loadGitignore()
-    └── paths.ts             # Path normalization helpers
+    ├── paths.ts             # Path normalization helpers
+    └── stats.ts             # Tool telemetry: in-memory call/error counters + append-only error log
 ```
 
 `kimi-mcp.json` is an example MCP host configuration showing how to launch the server with
@@ -110,9 +130,13 @@ Startup sequence in `src/index.ts` (`main()`):
 2. If the `files` table is empty, a full initial index runs automatically.
 3. The chokidar watcher starts on `PROJECT_ROOT`: reindexes individual files on add/change,
    removes them from the index on unlink.
-4. The MCP server connects over stdio and dispatches tool calls. Each tool's args are validated
-   with its zod schema, the handler returns a plain-text result, and any thrown error is
-   returned as `{ isError: true, content: [{ type: "text", text }] }`.
+4. The MCP server connects over stdio and dispatches tool calls via the `TOOL_HANDLERS` map.
+   Each tool's args are validated with its zod schema, the handler returns a plain-text result,
+   and any thrown error is returned as `{ isError: true, content: [{ type: "text", text }] }`.
+   The dispatcher also records telemetry (`src/utils/stats.ts`): `recordCall` on success,
+   `recordError` (which also appends to the error log file) on exceptions. Language servers
+   (`src/lsp/`) are NOT started here — backends spin up lazily on the first refactoring tool
+   call; `shutdownAll()` runs in the SIGINT/SIGTERM handlers.
 
 Indexing pipeline (`src/indexer/indexer.ts`):
 
@@ -145,6 +169,11 @@ config file and no dotenv loading — the MCP host supplies env (as in `kimi-mcp
 | `PGHOST` / `PGPORT` | `localhost` / `5432` | PostgreSQL connection |
 | `PGDATABASE` | `codebase_index` | Database name (auto-created) |
 | `PGUSER` / `PGPASSWORD` | `postgres` / `postgres` | PostgreSQL credentials |
+| `LSP_ENABLED` | `true` | Global switch for the LSP refactoring layer |
+| `TSSERVER_CMD` | bundled `node_modules/.bin/typescript-language-server` | TS/JS language server command |
+| `CSHARPLS_CMD` | `csharp-ls` | C# language server command |
+| `LSP_STARTUP_TIMEOUT_MS` / `LSP_REQUEST_TIMEOUT_MS` | `60000` / `30000` | LSP timeouts |
+| `MCP_ERROR_LOG` | `<PROJECT_ROOT>/.mcp-codebase-errors.log` | Append-only tool error log |
 
 `config.ts` also holds hardcoded tuning: `ignorePatterns` (node_modules, dist, build, .git,
 bin, obj, .vs, packages, coverage, .next, `*.min.js`, `*.map`), `languageMap`
@@ -183,10 +212,10 @@ bin, obj, .vs, packages, coverage, .next, `*.min.js`, `*.map`), `languageMap`
 
 **Add an MCP tool:**
 
-1. Create `src/tools/<name>.ts` exporting a zod schema and a `handle*` function returning
-   `Promise<string>`.
-2. Register the tool definition in the `TOOLS` array in `src/index.ts` and add a `case` to
-   the `CallToolRequestSchema` handler switch.
+1. Create `src/tools/<name>.ts` (or `src/tools/refactor/<name>.ts` for LSP-backed tools)
+   exporting a zod schema and a `handle*` function returning `Promise<string>`.
+2. Register the tool definition in the `TOOLS` array in `src/index.ts` and add an entry to
+   the `TOOL_HANDLERS` map (telemetry wrapping is automatic).
 
 **Schema changes:** DDL lives in `src/db/schema.ts` (`initSchema` uses `IF NOT EXISTS`, so new
 tables/indexes are additive-only; there is no migration framework). Batch insert/query helpers
@@ -220,3 +249,14 @@ go in `src/db/repositories.ts`.
 - `find_usages` is plain text search (word-boundary regex), not semantic reference resolution.
 - `get_module_dependencies` finds "used by" files via a `LIKE` match on import sources —
   a heuristic, not a resolved module graph.
+- **C# refactoring tools need the .NET SDK + `csharp-ls`** installed; without them the C#
+  LSP backend fails with a friendly error while the server keeps running.
+- `extract_method` is server-driven: availability depends on what the language server
+  offers for the exact selection; some actions need an interactive name prompt that cannot
+  be fulfilled non-interactively (apply, then use `rename_symbol`). No regex emulation.
+- `move_file` for C# is partial: the file is moved and reindexed, but namespace/using
+  updates are not guaranteed — verify with `get_diagnostics`.
+- `rename_symbol` retries the rename request until the edit set stabilizes because tsserver
+  loads the project asynchronously after the first `didOpen`.
+- `get_diagnostics` without `file_path` only reports diagnostics already published by
+  running language servers — it opens nothing and starts no backends.

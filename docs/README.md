@@ -2,8 +2,9 @@
 
 `mcp-codebase` is an **MCP (Model Context Protocol) server** that gives an AI agent semantic
 navigation over a codebase. It crawls a target project, parses source files into symbols,
-imports, and exports, stores them in **PostgreSQL**, and exposes six high-level MCP tools
-over **stdio**.
+imports, and exports, stores them in **PostgreSQL**, and exposes thirteen high-level MCP tools
+over **stdio** — six index-backed navigation tools, six LSP-backed refactoring tools, and a
+telemetry tool.
 
 > The server indexes an *external* codebase pointed at by `PROJECT_ROOT` — not its own source.
 
@@ -14,11 +15,11 @@ This folder contains the detailed, code-level documentation.
 
 | Document | What it covers |
 |---|---|
-| [architecture.md](architecture.md) | Runtime architecture: startup sequence, tool dispatch, indexing pipeline, watch mode, shutdown |
+| [architecture.md](architecture.md) | Runtime architecture: startup sequence, tool dispatch + telemetry, indexing pipeline, watch mode, LSP layer, shutdown |
 | [configuration.md](configuration.md) | Environment variables, hardcoded tuning in `src/config.ts`, connection pool settings |
 | [database.md](database.md) | PostgreSQL schema (tables, indexes), repository functions, symbol search semantics |
-| [tools.md](tools.md) | Reference for the six MCP tools: parameters, behavior, output format, examples |
-| [parsers.md](parsers.md) | `ILanguageParser` contract, the TypeScript and C# parsers, how to add a language |
+| [tools.md](tools.md) | Reference for the thirteen MCP tools: parameters, behavior, output format, examples |
+| [parsers.md](parsers.md) | `ILanguageParser` contract, the TypeScript and C# parsers, parsers vs LSP layer, how to add a language |
 | [development.md](development.md) | Build/run, code style, adding tools, schema changes, testing, security, known limitations |
 
 ## Reading guide
@@ -38,9 +39,10 @@ src/
 ├── config.ts       # All configuration (env vars + hardcoded tuning)
 ├── db/             # PostgreSQL: connection pool, schema DDL, queries
 ├── indexer/        # File crawler, indexing orchestration, chokidar watcher
+├── lsp/            # LSP client + language-server backends (refactoring tools)
 ├── parsers/        # ILanguageParser contract + TypeScript and C# parsers
-├── tools/          # One file per MCP tool (zod schema + handler)
-└── utils/          # .gitignore loading, path helpers
+├── tools/          # One file per MCP tool (zod schema + handler); refactor/ = LSP-backed
+└── utils/          # .gitignore loading, path helpers, tool telemetry
 ```
 
 ## Keeping these docs current

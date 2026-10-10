@@ -13,6 +13,12 @@ loading** — the MCP host supplies environment variables (see `kimi-mcp.json` f
 | `PGDATABASE` | `codebase_index` | Database name (auto-created on startup if missing) |
 | `PGUSER` | `postgres` | PostgreSQL user |
 | `PGPASSWORD` | `postgres` | PostgreSQL password |
+| `LSP_ENABLED` | `true` | Set to `false` to disable the LSP layer (refactoring tools return a text error) |
+| `TSSERVER_CMD` | bundled `typescript-language-server` from `node_modules/.bin` | Command used to spawn the TS/JS language server |
+| `CSHARPLS_CMD` | `csharp-ls` | Command used to spawn the C# language server |
+| `LSP_STARTUP_TIMEOUT_MS` | `60000` | Timeout for the LSP `initialize` handshake |
+| `LSP_REQUEST_TIMEOUT_MS` | `30000` | Timeout for individual LSP requests |
+| `MCP_ERROR_LOG` | `<PROJECT_ROOT>/.mcp-codebase-errors.log` | Append-only tool error log (telemetry) |
 
 Example host configuration (`kimi-mcp.json`):
 
@@ -43,6 +49,7 @@ Example host configuration (`kimi-mcp.json`):
 | `languageMap` | ext → language | Fallback `language` for files without a parser result; also defines the extension allowlists used by the watcher and `find_usages` |
 | `batchSize` | `1000` | Files per flush transaction in `indexProject()` |
 | `watchDebounceMs` | `300` | Watcher `awaitWriteFinish` stability threshold (ms) |
+| `lsp` | see env table above | LSP layer: enabled flag, backend commands, startup/request timeouts |
 
 `ignorePatterns`:
 

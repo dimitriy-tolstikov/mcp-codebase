@@ -1,8 +1,9 @@
 # MCP Tools Reference
 
-Six tools are registered in `src/index.ts` (`TOOLS` array + dispatch switch). Each tool
-lives in its own file under `src/tools/` and exports a zod schema plus a `handle*` function
-returning `Promise<string>`.
+Thirteen tools are registered in `src/index.ts` (`TOOLS` array + `TOOL_HANDLERS` dispatch
+map). Each navigation tool lives in its own file under `src/tools/`; the LSP-backed
+refactoring tools live under `src/tools/refactor/`. Every tool exports a zod schema plus a
+`handle*` function returning `Promise<string>`.
 
 Common conventions:
 
@@ -11,6 +12,8 @@ Common conventions:
 - Paths are relative to `PROJECT_ROOT` unless noted; use forward slashes.
 - "User errors" (e.g. symbol not found) are returned as normal text starting with `Error:`
   or a plain message; unexpected exceptions are caught by the dispatcher in `index.ts`.
+- All write tools accept `dryRun` (default `false`): with `dryRun: true` they compute and
+  report the edits without writing files or reindexing.
 
 ## `search_symbols`
 
@@ -108,7 +111,8 @@ The handler walks `PROJECT_ROOT` on disk (skipping `node_modules`, `.git`, `dist
 `name` + `file_path`), the definition's own line range is skipped.
 
 This is plain text search, not semantic resolution: same-named unrelated symbols match,
-and usages via destructuring/aliasing are not distinguished.
+and usages via destructuring/aliasing are not distinguished. For precise semantic
+references/renames use the LSP-backed tools (`rename_symbol`, `get_diagnostics`).
 
 ```json
 { "name": "UserService", "file_path": "src/services/UserService.ts" }
@@ -176,3 +180,137 @@ Notes:
   before re-insert, so symbols never duplicate.
 - `full: true` truncates all tables first — queries against the index may return empty
   results until it finishes.
+
+## LSP-backed refactoring tools
+
+The next six tools talk to real language servers through the LSP layer (`src/lsp/`) —
+see `docs/architecture.md` for how backends are started and `src/lsp/edits.ts` for how
+`WorkspaceEdit`s are applied. They require `LSP_ENABLED` not set to `false` (otherwise
+they return `Error: LSP support disabled (LSP_ENABLED=false)`), a file type with a
+registered backend (`Error: no LSP backend for this file type`), and a backend that
+declares the capability (`Error: operation '<op>' not supported by <backend> backend`).
+
+All of them share the `dryRun` parameter (default `false`). After a real (non-dry-run)
+write, changed files are synced back to the language server (didOpen/didChange) and
+reindexed via `indexSingleFile()`.
+
+## `rename_symbol`
+
+Semantic rename of a function/class/method/variable across the whole project.
+File: `src/tools/refactor/rename-symbol.ts`.
+
+| Parameter | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `file_path` | string | yes | — | File containing the symbol |
+| `line` | int ≥ 1 | yes | — | Line of the symbol (1-based) |
+| `column` | int ≥ 1 | yes | — | Column of the symbol (1-based) |
+| `new_name` | string | yes | — | New name |
+| `dryRun` | boolean | no | false | Report edits without writing |
+
+The handler issues `textDocument/rename`. Because tsserver loads the project
+asynchronously after the first `didOpen`, the rename request is retried (up to 5 times,
+800 ms apart) until the returned edit set stabilizes — otherwise references in not yet
+loaded files could be missed. `Error: rename not possible at ...` when the server refuses.
+
+Output: the `applyWorkspaceEdit()` report — per changed file, edit count and a short
+preview of the first changed lines:
+
+```
+Rename to 'hello':
+Applied edits to 2 file(s) and reindexed them.
+util.ts: 1 edit(s)
+  line 1: "export function hello(name: string): string {"
+main.ts: 2 edit(s)
+  ...
+```
+
+## `get_diagnostics`
+
+Compiler/linter diagnostics from the language server.
+File: `src/tools/refactor/get-diagnostics.ts`.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `file_path` | string | no | File to check. Omit for all diagnostics already published by running servers |
+| `severity` | `error\|warning\|info\|hint` | no | Minimum severity to include |
+
+With `file_path`, the document is opened/synced and the handler waits ~2 s for
+`publishDiagnostics` (they arrive in waves: syntax first, semantic later), then reports
+the latest set. Without `file_path`, only diagnostics already stored by running backends
+are reported — nothing is opened or started.
+
+Output lines: `file:line:col severity message (source)`, e.g.
+`main.ts:3:7 error Type 'string' is not assignable to type 'number'. (typescript)`.
+
+## `move_file`
+
+Move/rename a file, updating imports that reference it. File: `src/tools/refactor/move-file.ts`.
+
+| Parameter | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `old_path` | string | yes | — | Current file path |
+| `new_path` | string | yes | — | Target path (must not exist) |
+| `dryRun` | boolean | no | false | Report import updates without moving |
+
+For TS/JS the handler first asks tsserver for import updates
+(`workspace/executeCommand` → `_typescript.getEditsForFileRename`) and applies that edit,
+then performs the `fs.rename`, removes the old path from the index
+(`removeFileFromIndex`) and indexes the new one (`indexSingleFile`). For C# only the
+file move + reindex is done — namespace/using updates are **not** guaranteed; the report
+says so explicitly.
+
+## `organize_imports`
+
+Remove unused imports and sort the rest. File: `src/tools/refactor/organize-imports.ts`.
+
+| Parameter | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `file_path` | string | yes | — | File to organize |
+| `dryRun` | boolean | no | false | Report edits without writing |
+
+Requests a `textDocument/codeAction` with `only: ['source.organizeImports']`; if the
+action carries a command instead of an edit, it is executed via `workspace/executeCommand`.
+When the backend offers no such action: `Error: organize imports not supported by ...`.
+
+## `fix_all`
+
+Apply all auto-fixable diagnostics in a file. File: `src/tools/refactor/fix-all.ts`.
+
+| Parameter | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `file_path` | string | yes | — | File to fix |
+| `dryRun` | boolean | no | false | Report edits without writing |
+
+Waits briefly for diagnostics, then requests code actions with `only: ['source.fixAll']`
+(and executes the returned command if needed). With no diagnostics it returns
+`Nothing to fix: ...`; with diagnostics but no offered action:
+`Error: fix all not supported by ...`.
+
+## `extract_method`
+
+Extract a line range into a new method/function. File: `src/tools/refactor/extract-method.ts`.
+
+| Parameter | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `file_path` | string | yes | — | File containing the code |
+| `start_line` | int ≥ 1 | yes | — | First line of the range (1-based) |
+| `end_line` | int ≥ 1 | yes | — | Last line of the range (1-based) |
+| `new_name` | string | yes | — | Name for the extracted function |
+| `dryRun` | boolean | no | false | Report edits without writing |
+
+Requests code actions with `only: ['refactor.extract']` for the range and picks a
+function/method extraction action. Availability depends on what the server offers for
+that exact selection: `Error: refactoring not available at this position` when nothing is
+offered, and an honest error when the offered action requires an interactive name prompt
+the server cannot fulfill non-interactively (rename afterwards with `rename_symbol`).
+
+## `get_tool_stats`
+
+Read-only telemetry counters. File: `src/tools/tool-stats.ts` (data: `src/utils/stats.ts`).
+No parameters.
+
+Returns a plain-text table of `tool → calls → errors` since server start. Only thrown
+exceptions count as errors — user errors returned as plain text do not. Thrown exceptions
+are also appended to an error log (`MCP_ERROR_LOG`, default
+`<PROJECT_ROOT>/.mcp-codebase-errors.log`; one line per error: ISO timestamp, tool name,
+JSON args, message, stack).
