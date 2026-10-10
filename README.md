@@ -6,10 +6,12 @@ MCP server for semantic codebase navigation. Builds an AST index of symbols, imp
 
 ## Features
 
+- **Project overview** — a cheap "repo map" from the index: counts, top directories, key exported symbols ranked by importer count
 - **Symbol search** — finds functions, classes, interfaces, methods, etc. by name with wildcard (`*`, `?`) and OR (`|`) support
 - **Symbol details** — shows source code, signature, documentation, and file imports
 - **Module overview** — directory structure, key symbols, subdirectories, top imports
-- **Usage search** — finds all references to a symbol in the project
+- **Usage search** — finds all references to a symbol in the project (plain text)
+- **Semantic navigation** (LSP-backed): `find_references` (precise "who calls this") and `go_to_definition` (definition jump + hover info)
 - **Module dependencies** — imports, exports, and files that use the given module
 - **Reindexing** — full or incremental (by mtime)
 - **Watch mode** — automatic index updates when files change
@@ -19,7 +21,8 @@ MCP server for semantic codebase navigation. Builds an AST index of symbols, imp
 - **Tool telemetry** — `get_tool_stats` shows per-tool call/error counters for the running
   server process
 
-13 MCP tools in total: 6 navigation, 6 refactoring, 1 telemetry.
+16 MCP tools in total: 7 navigation, 8 LSP-backed, 1 telemetry. See `docs/benchmark.md`
+for the measured context savings vs a grep-only agent loop (~18x fewer bytes on this repo).
 
 ## Supported Languages
 
@@ -81,6 +84,13 @@ Add to `kimi-mcp.json`:
 
 ## MCP Tools
 
+### `project_overview`
+Cheap project map — call first on an unfamiliar project.
+
+```json
+{ "max_symbols": 20 }
+```
+
 ### `search_symbols`
 Search symbols by name with filtering.
 
@@ -134,8 +144,10 @@ Force reindexing.
 ### Refactoring tools (LSP-backed)
 
 Require a language server for the file type (TS/JS out of the box; C# needs `csharp-ls`).
-All accept `dryRun: true` to preview edits without writing.
+All write tools accept `dryRun: true` to preview edits without writing.
 
+- `find_references` — `{ "file_path": "src/util.ts", "line": 12, "column": 17 }` (semantic references)
+- `go_to_definition` — `{ "file_path": "src/main.ts", "line": 5, "column": 10 }` (definition + hover)
 - `rename_symbol` — `{ "file_path": "src/util.ts", "line": 12, "column": 17, "new_name": "hello" }`
 - `get_diagnostics` — `{ "file_path": "src/util.ts", "severity": "error" }` (omit `file_path` for all stored diagnostics)
 - `move_file` — `{ "old_path": "src/a.ts", "new_path": "src/lib/a.ts" }`
@@ -180,13 +192,16 @@ src/
 │   ├── find-usages.ts
 │   ├── module-deps.ts
 │   ├── reindex.ts
+│   ├── project-overview.ts
 │   ├── tool-stats.ts
-│   └── refactor/            # rename-symbol, get-diagnostics, move-file,
-│                            # organize-imports, fix-all, extract-method
+│   └── refactor/            # find-references, go-to-definition, rename-symbol,
+│                            # get-diagnostics, move-file, organize-imports,
+│                            # fix-all, extract-method
 └── utils/
     ├── gitignore.ts
     ├── paths.ts
     └── stats.ts             # tool telemetry
+benchmarks/                  # micro-benchmark suite (see docs/benchmark.md)
 ```
 
 ## Performance

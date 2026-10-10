@@ -33,6 +33,8 @@ export class CSharpBackend implements ILspBackend {
     'organize_imports',
     'fix_all',
     'extract_method',
+    'references',
+    'definition',
   ]);
 
   private lspClient: LspClient | null = null;

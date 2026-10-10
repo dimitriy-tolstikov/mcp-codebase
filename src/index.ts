@@ -25,6 +25,9 @@ import { MoveFileSchema, handleMoveFile } from "./tools/refactor/move-file.js";
 import { OrganizeImportsSchema, handleOrganizeImports } from "./tools/refactor/organize-imports.js";
 import { FixAllSchema, handleFixAll } from "./tools/refactor/fix-all.js";
 import { ExtractMethodSchema, handleExtractMethod } from "./tools/refactor/extract-method.js";
+import { FindReferencesSchema, handleFindReferences } from "./tools/refactor/find-references.js";
+import { GoToDefinitionSchema, handleGoToDefinition } from "./tools/refactor/go-to-definition.js";
+import { ProjectOverviewSchema, handleProjectOverview } from "./tools/project-overview.js";
 import { handleToolStats } from "./tools/tool-stats.js";
 import { recordCall, recordError } from "./utils/stats.js";
 import { shutdownAll } from "./lsp/registry.js";
@@ -44,14 +47,29 @@ const TOOL_HANDLERS: Record<string, { schema: z.ZodTypeAny; handler: ToolHandler
   organize_imports: { schema: OrganizeImportsSchema, handler: handleOrganizeImports as ToolHandler },
   fix_all: { schema: FixAllSchema, handler: handleFixAll as ToolHandler },
   extract_method: { schema: ExtractMethodSchema, handler: handleExtractMethod as ToolHandler },
+  find_references: { schema: FindReferencesSchema, handler: handleFindReferences as ToolHandler },
+  go_to_definition: { schema: GoToDefinitionSchema, handler: handleGoToDefinition as ToolHandler },
+  project_overview: { schema: ProjectOverviewSchema, handler: handleProjectOverview as ToolHandler },
   get_tool_stats: { schema: z.object({}), handler: handleToolStats as ToolHandler },
 };
 
 const TOOLS: Tool[] = [
   {
+    name: "project_overview",
+    description:
+      "Cheap project map from the index: file/symbol counts, top-level directories, key exported symbols ranked by importer count. USE FIRST when entering an unfamiliar project or module — one call instead of reading many files. Do NOT use for finding a specific symbol — use search_symbols.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: { type: "string", description: "Limit to a subdirectory (relative to project root)" },
+        max_symbols: { type: "number", description: "Max key symbols to list", default: 40 },
+      },
+    },
+  },
+  {
     name: "search_symbols",
     description:
-      "Search for symbols (functions, classes, interfaces, methods, etc.) across the codebase. Supports wildcards (*, ?) and OR operator (|). Filters by kind, language, and file path.",
+      "Find symbols (functions, classes, interfaces, methods) by name across the indexed codebase. Supports wildcards (*, ?), OR (|), and fuzzy matching. USE when you know (part of) the symbol name — this is the cheapest way to locate a definition. If you get 0 results or >50, fall back to a plain-text search (find_usages or grep). Do NOT use to find call sites — use find_references.",
     inputSchema: {
       type: "object",
       properties: {
@@ -68,7 +86,7 @@ const TOOLS: Tool[] = [
   {
     name: "get_symbol_details",
     description:
-      "Get full details about a symbol: source code, signature, docstring, imports in the file, and other symbols in the same file.",
+      "Get full details about one symbol: numbered source code, signature, docstring, imports in its file, sibling symbols. USE after search_symbols to read a symbol's implementation without opening the whole file. Do NOT use for a project overview — use project_overview or explore_module.",
     inputSchema: {
       type: "object",
       properties: {
@@ -81,7 +99,7 @@ const TOOLS: Tool[] = [
   {
     name: "explore_module",
     description:
-      "Explore a directory/module: list files, key symbols, subdirectories, and top imports. Useful for understanding project structure.",
+      "Explore one directory: file counts, key symbols, subdirectories, top imports. USE to understand a specific module after project_overview. Do NOT use for the whole project root in one shot — start with project_overview instead.",
     inputSchema: {
       type: "object",
       properties: {
@@ -94,7 +112,7 @@ const TOOLS: Tool[] = [
   {
     name: "find_usages",
     description:
-      "Find all usages/references of a symbol across the codebase. Searches in source files for occurrences of the symbol name. Note: this is plain text search, not semantic reference resolution; for precise rename/references use the rename_symbol/get_diagnostics LSP tools.",
+      "Plain-text (word-boundary) search for a symbol name across source files — fast, works without a language server, but matches same-named unrelated symbols. USE for a quick scan, for languages without an LSP backend, or when find_references is unavailable. For exact semantic references prefer find_references (needs file/line/column of the symbol).",
     inputSchema: {
       type: "object",
       properties: {
@@ -106,9 +124,39 @@ const TOOLS: Tool[] = [
     },
   },
   {
+    name: "find_references",
+    description:
+      "Semantic 'who calls/uses this' via the language server — precise references for the symbol at the given position. USE to answer impact questions ('is it safe to change X?', 'who calls X?'). Get the position from search_symbols or get_symbol_details first. Note: starts a language server on first call (slower); for a quick rough scan use find_usages instead.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        file_path: { type: "string", description: "File containing the symbol (relative to project root or absolute)" },
+        line: { type: "number", description: "Line number of the symbol (1-based)" },
+        column: { type: "number", description: "Column number of the symbol (1-based)" },
+        include_declaration: { type: "boolean", description: "Include the declaration itself", default: false },
+        limit: { type: "number", description: "Max results", default: 100 },
+      },
+      required: ["file_path", "line", "column"],
+    },
+  },
+  {
+    name: "go_to_definition",
+    description:
+      "Jump to the definition of the symbol at the given position, plus hover info (type, signature, docstring) from the language server. USE before reading a whole file: resolve where a name is defined, then read just that symbol with get_symbol_details. Do NOT use to find usages — use find_references.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        file_path: { type: "string", description: "File containing the symbol reference (relative to project root or absolute)" },
+        line: { type: "number", description: "Line number of the symbol (1-based)" },
+        column: { type: "number", description: "Column number of the symbol (1-based)" },
+      },
+      required: ["file_path", "line", "column"],
+    },
+  },
+  {
     name: "get_module_dependencies",
     description:
-      "Show dependencies of a file: what it imports, what it exports, and which files import it.",
+      "Show dependencies of one file: what it imports, what it exports, and which files import it (heuristic match). USE to understand a file's place in the module graph before changing it. Do NOT use for symbol-level impact — use find_references.",
     inputSchema: {
       type: "object",
       properties: {
@@ -120,7 +168,7 @@ const TOOLS: Tool[] = [
   {
     name: "reindex",
     description:
-      "Trigger a reindex of the codebase. Use full=true for complete reindex, or full=false for incremental (checks file mtimes).",
+      "Trigger a reindex of the codebase (full=false: incremental by mtime; full=true: truncate and rebuild). USE when the index looks stale (search results don't match the files on disk). Usually unnecessary — the watcher keeps the index current automatically.",
     inputSchema: {
       type: "object",
       properties: {
@@ -131,7 +179,7 @@ const TOOLS: Tool[] = [
   {
     name: "rename_symbol",
     description:
-      "Semantically rename a symbol (function, class, method, variable) across the project via the language server. Do NOT use for a quick text replacement in one file you can edit yourself; do NOT use when LSP support is disabled (LSP_ENABLED=false).",
+      "Semantically rename a symbol (function, class, method, variable) across the whole project via the language server. USE for renames that span files or risk collisions. Do NOT use for a trivial rename in one file you are editing anyway. After renaming, verify with get_diagnostics.",
     inputSchema: {
       type: "object",
       properties: {
@@ -147,7 +195,7 @@ const TOOLS: Tool[] = [
   {
     name: "get_diagnostics",
     description:
-      "Get compiler/linter diagnostics (errors, warnings) from the language server for a file, or all stored diagnostics when file_path is omitted. Do NOT use to search for symbols — use search_symbols.",
+      "Get compiler/linter diagnostics (errors, warnings) from the language server for a file, or all stored diagnostics when file_path is omitted. USE after every rename/move/fix to verify nothing broke, and before editing an unfamiliar file. Do NOT use to search for symbols — use search_symbols.",
     inputSchema: {
       type: "object",
       properties: {
@@ -159,7 +207,7 @@ const TOOLS: Tool[] = [
   {
     name: "move_file",
     description:
-      "Move/rename a file and update imports referencing it (TS/JS: full import rewrite via tsserver; C#: file move only, namespace updates not guaranteed). Do NOT use for renaming a symbol inside a file — use rename_symbol.",
+      "Move/rename a file and update imports referencing it (TS/JS: full import rewrite via tsserver; C#: file move only, namespace updates not guaranteed). USE instead of manually moving a file + fixing imports. Do NOT use for renaming a symbol inside a file — use rename_symbol. Verify with get_diagnostics afterwards.",
     inputSchema: {
       type: "object",
       properties: {
@@ -173,7 +221,7 @@ const TOOLS: Tool[] = [
   {
     name: "organize_imports",
     description:
-      "Remove unused imports and sort the remaining ones in a file via the language server. Do NOT use to add missing imports.",
+      "Remove unused imports and sort the remaining ones in a file via the language server. USE to clean up an import block mechanically. Do NOT use to add missing imports — the language server only removes/sorts here.",
     inputSchema: {
       type: "object",
       properties: {
@@ -186,7 +234,7 @@ const TOOLS: Tool[] = [
   {
     name: "fix_all",
     description:
-      "Apply all auto-fixable diagnostics (source.fixAll) in a file via the language server. Do NOT use for errors that need a design decision — the server only applies mechanical fixes.",
+      "Apply all auto-fixable diagnostics (source.fixAll) in a file via the language server. USE to clear mechanical warnings (unused vars, formatting rules) in one call. Do NOT use for errors that need a design decision — only mechanical fixes are applied.",
     inputSchema: {
       type: "object",
       properties: {
@@ -199,7 +247,7 @@ const TOOLS: Tool[] = [
   {
     name: "extract_method",
     description:
-      "Extract a line range into a new method/function via the language server. Availability depends on the selected code; returns an honest error when no refactoring is offered. Do NOT use for ranges that span declarations (extract works on statements inside a body).",
+      "Extract a line range into a new method/function via the language server. USE to split a long function without manual edit errors. Availability depends on the selected code (works on statements inside a body, not across declarations); returns an honest error when the server offers nothing.",
     inputSchema: {
       type: "object",
       properties: {

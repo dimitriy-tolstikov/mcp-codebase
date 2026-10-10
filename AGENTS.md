@@ -32,9 +32,11 @@ is verifiable. Only then proceed:
 
 `mcp-codebase` is an **MCP (Model Context Protocol) server** that gives an AI agent semantic
 navigation over a codebase. It crawls a target project, parses source files into symbols,
-imports, and exports, stores them in **PostgreSQL**, and exposes thirteen high-level MCP tools
+imports, and exports, stores them in **PostgreSQL**, and exposes sixteen high-level MCP tools
 over **stdio**:
 
+- `project_overview` — cheap project map from the index: counts, top directories, key
+  exported symbols ranked by importer count.
 - `search_symbols` — find symbols by name with wildcards (`*`, `?`), OR (`|`), and fuzzy
   trigram matching; filter by kind, language, file path.
 - `get_symbol_details` — source code, signature, docstring, file imports, sibling symbols.
@@ -42,6 +44,8 @@ over **stdio**:
 - `find_usages` — grep-style reference search for a symbol name across the project.
 - `get_module_dependencies` — what a file imports, what it exports, which files import it.
 - `reindex` — full or incremental reindex of the target project.
+- `find_references` — semantic "who calls/uses this" via LSP (`textDocument/references`).
+- `go_to_definition` — definition jump + hover info via LSP.
 - `rename_symbol` — LSP-backed semantic rename across the project.
 - `get_diagnostics` — compiler/linter diagnostics from the language server (file or stored project-wide).
 - `move_file` — move/rename a file with import updates (TS/JS full; C# move-only).
@@ -69,6 +73,7 @@ npm install        # installs deps; `prepare` script also runs the build
 npm run build      # tsc: src/ -> dist/ (with declarations and source maps)
 npm run dev        # tsc --watch
 npm start          # node dist/index.js  (runs the MCP server on stdio)
+npm run benchmark  # micro-benchmark suite (benchmarks/), see docs/benchmark.md
 ```
 
 There is no test script, linter, or formatter configured — see "Testing and verification".
@@ -106,8 +111,10 @@ src/
 │   ├── find-usages.ts
 │   ├── module-deps.ts
 │   ├── reindex.ts
+│   ├── project-overview.ts   # project_overview repo-map tool
 │   ├── tool-stats.ts        # get_tool_stats telemetry tool
-│   └── refactor/            # LSP-backed tools: common.ts helper + rename-symbol, get-diagnostics,
+│   └── refactor/            # LSP-backed tools: common.ts helper + find-references,
+│                            # go-to-definition, rename-symbol, get-diagnostics,
 │                            # move-file, organize-imports, fix-all, extract-method
 └── utils/
     ├── gitignore.ts         # loadGitignore()
@@ -257,6 +264,7 @@ go in `src/db/repositories.ts`.
 - `move_file` for C# is partial: the file is moved and reindexed, but namespace/using
   updates are not guaranteed — verify with `get_diagnostics`.
 - `rename_symbol` retries the rename request until the edit set stabilizes because tsserver
-  loads the project asynchronously after the first `didOpen`.
+  loads the project asynchronously after the first `didOpen`. `find_references` does the
+  same with a minimum of 3 attempts — an early "stable" result can still be incomplete.
 - `get_diagnostics` without `file_path` only reports diagnostics already published by
   running language servers — it opens nothing and starts no backends.

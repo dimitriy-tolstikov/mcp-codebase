@@ -1,9 +1,13 @@
 # MCP Tools Reference
 
-Thirteen tools are registered in `src/index.ts` (`TOOLS` array + `TOOL_HANDLERS` dispatch
+Sixteen tools are registered in `src/index.ts` (`TOOLS` array + `TOOL_HANDLERS` dispatch
 map). Each navigation tool lives in its own file under `src/tools/`; the LSP-backed
-refactoring tools live under `src/tools/refactor/`. Every tool exports a zod schema plus a
+tools live under `src/tools/refactor/`. Every tool exports a zod schema plus a
 `handle*` function returning `Promise<string>`.
+
+Tool descriptions in `src/index.ts` follow a deliberate pattern — what the tool does,
+when to use it, and when NOT to (with the alternative named). This guides the agent's
+tool choice; keep the pattern when adding tools.
 
 Common conventions:
 
@@ -15,8 +19,30 @@ Common conventions:
 - All write tools accept `dryRun` (default `false`): with `dryRun: true` they compute and
   report the edits without writing files or reindexing.
 
-## `search_symbols`
+## `project_overview`
 
+Cheap project map from the index — the recommended first call on an unfamiliar project.
+File: `src/tools/project-overview.ts` → `getProjectOverview()` in `src/db/repositories.ts`.
+
+| Parameter | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `path` | string | no | — | Limit the overview to a subdirectory |
+| `max_symbols` | int 1–100 | no | 40 | Max key symbols to list |
+
+```json
+{ "max_symbols": 20 }
+```
+
+Output sections:
+
+- `Files: N (X typescript, Y csharp)` — indexed file counts grouped by language.
+- `Symbols: N` — total indexed symbols.
+- `Top-level directories:` — up to 15 first path segments with file counts.
+- `Key exported symbols (by importer count):` — exported symbols ranked by how many
+  distinct files import their module (same `LIKE` heuristic as `get_module_dependencies`) —
+  a relational analogue of Aider's PageRank repo map.
+
+## `search_symbols`
 Search for symbols (functions, classes, interfaces, methods, etc.) across the codebase.
 File: `src/tools/search-symbols.ts` → `searchSymbols()` in `src/db/repositories.ts`.
 
@@ -112,7 +138,7 @@ The handler walks `PROJECT_ROOT` on disk (skipping `node_modules`, `.git`, `dist
 
 This is plain text search, not semantic resolution: same-named unrelated symbols match,
 and usages via destructuring/aliasing are not distinguished. For precise semantic
-references/renames use the LSP-backed tools (`rename_symbol`, `get_diagnostics`).
+references use `find_references`; for renames use `rename_symbol`.
 
 ```json
 { "name": "UserService", "file_path": "src/services/UserService.ts" }
@@ -181,9 +207,9 @@ Notes:
 - `full: true` truncates all tables first — queries against the index may return empty
   results until it finishes.
 
-## LSP-backed refactoring tools
+## LSP-backed tools
 
-The next six tools talk to real language servers through the LSP layer (`src/lsp/`) —
+The next eight tools talk to real language servers through the LSP layer (`src/lsp/`) —
 see `docs/architecture.md` for how backends are started and `src/lsp/edits.ts` for how
 `WorkspaceEdit`s are applied. They require `LSP_ENABLED` not set to `false` (otherwise
 they return `Error: LSP support disabled (LSP_ENABLED=false)`), a file type with a
@@ -223,6 +249,41 @@ util.ts: 1 edit(s)
 main.ts: 2 edit(s)
   ...
 ```
+
+## `find_references`
+
+Semantic "who calls/uses this" via the language server (`textDocument/references`).
+File: `src/tools/refactor/find-references.ts`.
+
+| Parameter | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `file_path` | string | yes | — | File containing the symbol |
+| `line` | int ≥ 1 | yes | — | Line of the symbol (1-based) |
+| `column` | int ≥ 1 | yes | — | Column of the symbol (1-based) |
+| `include_declaration` | boolean | no | false | Include the declaration itself |
+| `limit` | int 1–500 | no | 100 | Max results |
+
+Like `rename_symbol`, the request is retried until the result set stabilizes (tsserver
+loads the project asynchronously) — with a minimum of 3 attempts, because an early
+"stable" answer can still be incomplete. Output: `References (found N):` then per hit
+`file:line:column` plus the trimmed source line, truncated at `limit`.
+
+This is the precise counterpart of `find_usages` (which is plain text search).
+
+## `go_to_definition`
+
+Jump to the definition of the symbol at a position, plus hover info (type, signature,
+docstring). File: `src/tools/refactor/go-to-definition.ts`.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `file_path` | string | yes | File containing the symbol reference |
+| `line` | int ≥ 1 | yes | Line of the symbol (1-based) |
+| `column` | int ≥ 1 | yes | Column of the symbol (1-based) |
+
+Issues `textDocument/definition` and `textDocument/hover` in parallel. Output: a `Hover:`
+block (when the server provides it) followed by `Definition(s):` as `file:line:column`
+with the first source line. `No definition found at ...` when the server resolves nothing.
 
 ## `get_diagnostics`
 

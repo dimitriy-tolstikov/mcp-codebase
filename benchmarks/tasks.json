@@ -1,0 +1,65 @@
+[
+  {
+    "name": "project map",
+    "tool": "project_overview",
+    "args": { "max_symbols": 20 },
+    "expect": "Project overview",
+    "grep": null
+  },
+  {
+    "name": "find symbol by name",
+    "tool": "search_symbols",
+    "args": { "query": "handleSearchSymbols" },
+    "expect": "handleSearchSymbols",
+    "grep": "handleSearchSymbols"
+  },
+  {
+    "name": "fuzzy symbol search",
+    "tool": "search_symbols",
+    "args": { "query": "SymboDetails", "limit": 5 },
+    "expect": "symbol",
+    "grep": "handleSymbolDetails"
+  },
+  {
+    "name": "symbol details by id lookup",
+    "tool": "get_symbol_details",
+    "args": { "name": "handleSearchSymbols", "file_path": "src/tools/search-symbols.ts" },
+    "expect": "handleSearchSymbols",
+    "grep": "handleSearchSymbols"
+  },
+  {
+    "name": "module overview",
+    "tool": "explore_module",
+    "args": { "path": "src/lsp", "depth": 1 },
+    "expect": "client.ts",
+    "grep": "class LspClient"
+  },
+  {
+    "name": "text usages of a symbol",
+    "tool": "find_usages",
+    "args": { "name": "indexSingleFile" },
+    "expect": "References to indexSingleFile",
+    "grep": "indexSingleFile"
+  },
+  {
+    "name": "semantic references",
+    "tool": "find_references",
+    "args": { "file_path": "src/tools/search-symbols.ts", "line": 13, "column": 23 },
+    "expect": "References",
+    "grep": "handleSearchSymbols"
+  },
+  {
+    "name": "go to definition",
+    "tool": "go_to_definition",
+    "args": { "file_path": "src/tools/search-symbols.ts", "line": 13, "column": 23 },
+    "expect": "Definition",
+    "grep": "handleSearchSymbols"
+  },
+  {
+    "name": "module dependencies",
+    "tool": "get_module_dependencies",
+    "args": { "path": "src/indexer/indexer.ts" },
+    "expect": "Imports",
+    "grep": "indexer"
+  }
+]

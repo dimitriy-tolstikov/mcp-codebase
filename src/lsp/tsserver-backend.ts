@@ -23,6 +23,8 @@ export class TsserverBackend implements ILspBackend {
     'fix_all',
     'extract_method',
     'diagnostics',
+    'references',
+    'definition',
   ]);
 
   private lspClient: LspClient | null = null;

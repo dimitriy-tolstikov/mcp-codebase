@@ -318,3 +318,52 @@ export async function getModuleStats(dirPath: string): Promise<any> {
     topImports: importResult.rows,
   };
 }
+
+export async function getProjectOverview(dirPrefix: string, maxSymbols: number): Promise<any> {
+  const like = `${dirPrefix}%`;
+
+  const countResult = await query(
+    `SELECT language, COUNT(*)::int as file_count
+     FROM files WHERE path LIKE $1 GROUP BY language ORDER BY file_count DESC`,
+    [like]
+  );
+
+  const symbolCountResult = await query(
+    `SELECT COUNT(*)::int as count FROM symbols s
+     JOIN files f ON s.file_id = f.id WHERE f.path LIKE $1`,
+    [like]
+  );
+
+  const dirResult = await query(
+    `SELECT split_part(path, '/', 1) AS dir, COUNT(*)::int AS file_count
+     FROM files WHERE path LIKE $1
+     GROUP BY dir ORDER BY file_count DESC LIMIT 15`,
+    [like]
+  );
+
+  // Key exported symbols ranked by how many distinct files import their module.
+  // The importer count is the same LIKE heuristic as get_module_dependencies:
+  // an import source containing the module's basename (without extension) counts.
+  const keySymbolsResult = await query(
+    `SELECT COALESCE(s.name, e.name) AS name, s.kind, f.path, s.line_start,
+            COUNT(DISTINCT i.file_id)::int AS imported_by
+     FROM exports e
+     JOIN files f ON e.file_id = f.id
+     LEFT JOIN symbols s ON e.symbol_id = s.id
+     LEFT JOIN imports i
+       ON i.source LIKE '%' || regexp_replace(f.path, '^(.*/)?([^/]+)\\.[^.]+$', '\\2')
+      AND i.file_id <> f.id
+     WHERE f.path LIKE $1 AND (e.is_reexport = false)
+     GROUP BY s.name, e.name, s.kind, f.path, s.line_start
+     ORDER BY imported_by DESC, f.path
+     LIMIT $2`,
+    [like, maxSymbols]
+  );
+
+  return {
+    languages: countResult.rows,
+    symbolCount: symbolCountResult.rows[0]?.count ?? 0,
+    topDirs: dirResult.rows,
+    keySymbols: keySymbolsResult.rows,
+  };
+}

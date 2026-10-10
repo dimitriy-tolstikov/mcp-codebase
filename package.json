@@ -11,6 +11,7 @@
     "build": "tsc",
     "dev": "tsc --watch",
     "start": "node dist/index.js",
+    "benchmark": "node benchmarks/run-micro.mjs",
     "prepare": "npm run build"
   },
   "keywords": [

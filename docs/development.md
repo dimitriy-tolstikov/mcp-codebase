@@ -42,7 +42,7 @@ src/
 │   ├── typescript.ts        # TS/JS parser (TypeScript Compiler API)
 │   └── csharp.ts            # Regex-based C# parser
 ├── tools/                   # One file per MCP tool (zod schema + handler)
-│   ├── refactor/            # LSP-backed refactoring tools (rename, move, ...)
+│   ├── refactor/            # LSP-backed tools (references, definition, rename, move, ...)
 │   └── tool-stats.ts        # get_tool_stats telemetry tool
 └── utils/
     ├── gitignore.ts         # loadGitignore()

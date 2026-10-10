@@ -76,7 +76,7 @@ the AST indexing pipeline:
   `LSP_REQUEST_TIMEOUT_MS`, and shuts the server down gracefully.
 - `backend.ts` — `ILspBackend`: `languageId`, `extensions`, `capabilities`
   (a `Set` of `rename | move_file | organize_imports | fix_all | extract_method |
-  diagnostics`), `ensureStarted()`, `client`.
+  diagnostics | references | definition`), `ensureStarted()`, `client`.
 - `tsserver-backend.ts` — spawns `typescript-language-server --stdio` (resolved from this
   package's `node_modules/.bin`, overridable via `TSSERVER_CMD`).
 - `csharp-backend.ts` — spawns `csharp-ls` (`CSHARPLS_CMD`); checks availability with

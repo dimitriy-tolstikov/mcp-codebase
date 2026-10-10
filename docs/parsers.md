@@ -122,8 +122,9 @@ There are two, deliberately separate, language-aware subsystems:
 - **Parsers (this document)** feed the *index*: fast, offline, approximate (regex for C#),
   used by the navigation tools (`search_symbols`, `get_symbol_details`, ...) and the
   watcher. They never talk to a language server.
-- **LSP backends (`src/lsp/`)** power the *refactoring* tools (`rename_symbol`,
-  `get_diagnostics`, `move_file`, `organize_imports`, `fix_all`, `extract_method`):
+- **LSP backends (`src/lsp/`)** power the *semantic* tools (`rename_symbol`,
+  `get_diagnostics`, `move_file`, `organize_imports`, `fix_all`, `extract_method`,
+  plus the read-only `find_references` and `go_to_definition`):
   precise and semantic, but heavyweight — a real language server process per language,
   started lazily on first use.
 

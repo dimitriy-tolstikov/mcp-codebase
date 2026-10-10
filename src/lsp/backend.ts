@@ -6,7 +6,9 @@ export type RefactorOp =
   | 'organize_imports'
   | 'fix_all'
   | 'extract_method'
-  | 'diagnostics';
+  | 'diagnostics'
+  | 'references'
+  | 'definition';
 
 export interface ILspBackend {
   readonly languageId: string;
