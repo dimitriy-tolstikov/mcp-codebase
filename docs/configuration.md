@@ -54,9 +54,14 @@ Example host configuration (`kimi-mcp.json`):
 `ignorePatterns`:
 
 ```
-node_modules/**  dist/**  build/**  .git/**  *.min.js  *.map
-bin/**  obj/**  .vs/**  packages/**  coverage/**  .next/**
+**/node_modules/**  **/dist/**  **/build/**  .git/**  *.min.js  *.map
+**/bin/**  **/obj/**  **/.vs/**  **/packages/**  **/coverage/**  **/.next/**
 ```
+
+The `**/` prefix makes the directory patterns match at any nesting depth (e.g.
+`browser-extension/node_modules/`), not only at the project root. The crawler
+additionally applies these as per-directory basename filters
+(`src/indexer/file-crawler.ts`), so ignored directories are never descended into.
 
 `languageMap`:
 
@@ -69,9 +74,11 @@ bin/**  obj/**  .vs/**  packages/**  coverage/**  .next/**
 
 The chokidar watcher (`src/indexer/watcher.ts`) has its own, separate ignore list —
 dotfiles (regex), `node_modules`, `dist`, `build`, `*.min.js`, `*.map` — and reindexes
-only the extensions from `config.languageMap` on add/change. Changing
-`config.ignorePatterns` does **not** affect the watcher; extending `config.languageMap`
-does.
+only the extensions from `config.languageMap` on add/change. chokidar v4 has no glob
+support, so these are regexes that match at any nesting depth. Watcher errors
+(e.g. `ENOSPC` when the inotify watch limit is exhausted) are logged to stderr and no
+longer crash the server. Changing `config.ignorePatterns` does **not** affect the
+watcher; extending `config.languageMap` does.
 
 ## Connection pool
 

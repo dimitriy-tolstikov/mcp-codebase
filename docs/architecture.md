@@ -136,7 +136,8 @@ half for files removed from disk.
 
 `startWatcher()` (`src/indexer/watcher.ts`) uses chokidar with:
 
-- `ignored`: dotfiles, `node_modules`, `dist`, `build`, `*.min.js`, `*.map`
+- `ignored`: dotfiles, `node_modules`, `dist`, `build`, `*.min.js`, `*.map` — as regexes
+  matching at any nesting depth (chokidar v4 has no glob support)
 - `ignoreInitial: true`, `awaitWriteFinish: { stabilityThreshold: config.watchDebounceMs`
   (300 ms), `pollInterval: 100 }`
 
@@ -146,6 +147,8 @@ Handlers:
   `config.languageMap`. Successes and failures are logged to stderr.
 - `unlink` → `removeFileFromIndex()` deletes the file row (children cascade), so deleted
   files disappear from the index immediately.
+- `error` → logged to stderr; watcher errors (e.g. `ENOSPC` inotify limits) never crash
+  the server.
 
 The watcher is a singleton; a second `startWatcher()` call is a no-op.
 

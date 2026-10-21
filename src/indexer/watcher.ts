@@ -12,13 +12,15 @@ export function startWatcher(rootDir: string): void {
   if (watcher) return;
 
   watcher = watch(rootDir, {
+    // chokidar v4 has no glob support: strings match exact paths only, so
+    // directory names must be regexes to be ignored at any nesting depth
     ignored: [
       /(^|[\/\\])\../, // dotfiles
-      'node_modules',
-      'dist',
-      'build',
-      '*.min.js',
-      '*.map',
+      /(^|[\/\\])node_modules([\/\\]|$)/,
+      /(^|[\/\\])dist([\/\\]|$)/,
+      /(^|[\/\\])build([\/\\]|$)/,
+      /\.min\.js$/,
+      /\.map$/,
     ],
     ignoreInitial: true,
     persistent: true,
@@ -52,6 +54,10 @@ export function startWatcher(rootDir: string): void {
   watcher.on('add', handleChange);
   watcher.on('change', handleChange);
   watcher.on('unlink', handleUnlink);
+  // Never let watcher errors (e.g. ENOSPC from inotify limits) crash the server
+  watcher.on('error', (err) => {
+    console.error('[watch] Watcher error:', (err as Error).message);
+  });
 
   console.error(`[watch] Watching ${rootDir}`);
 }

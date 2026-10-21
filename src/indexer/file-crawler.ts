@@ -18,7 +18,7 @@ export function* crawlFiles(
   extraIgnorePatterns: string[]
 ): Generator<FileEntry> {
   const stack: string[] = [''];
-  const extraIg = new Set(extraIgnorePatterns.map((p) => p.replace(/\*\*/g, '').replace(/\*/g, '').replace(/\/$/, '')));
+  const extraIg = new Set(extraIgnorePatterns.map((p) => p.replace(/\*/g, '').replace(/^\/+|\/+$/g, '')));
 
   while (stack.length > 0) {
     const relDir = stack.pop()!;

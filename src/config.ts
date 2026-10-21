@@ -10,18 +10,18 @@ export const config = {
   },
 
   ignorePatterns: [
-    'node_modules/**',
-    'dist/**',
-    'build/**',
+    '**/node_modules/**',
+    '**/dist/**',
+    '**/build/**',
     '.git/**',
     '*.min.js',
     '*.map',
-    'bin/**',
-    'obj/**',
-    '.vs/**',
-    'packages/**',
-    'coverage/**',
-    '.next/**',
+    '**/bin/**',
+    '**/obj/**',
+    '**/.vs/**',
+    '**/packages/**',
+    '**/coverage/**',
+    '**/.next/**',
   ],
 
   languageMap: {
